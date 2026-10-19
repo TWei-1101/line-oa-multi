@@ -1,0 +1,301 @@
+{
+  "config": {
+    "flow_title": "LINE OA Gateway ({name})",
+    "step": {
+      "hassio_confirm": {
+        "title": "Connect the LINE OA add-on",
+        "description": "Connect the add-on \"{addon}\" to Home Assistant?\n\nHome Assistant will pair with the add-on securely and receive its own API key. No IP address, port or API key needs to be entered. No LINE message is sent."
+      },
+      "hassio_migrate": {
+        "title": "LINE OA add-on found",
+        "description": "The add-on \"{addon}\" was found, but LINE OA is already connected to {url}.\n\nSwitch the existing LINE OA integration to the add-on? Entities, entity IDs and automations are kept.",
+        "menu_options": {
+          "migrate_keep": "Keep the current connection",
+          "migrate_switch": "Switch to the add-on"
+        }
+      },
+      "migrate_switch": {
+        "title": "Switch Gateway",
+        "description": "LINE OA will be switched from {url} (instance {old_instance}) to the add-on \"{addon}\" (instance {new_instance}).\n\nHome Assistant first pairs with the add-on and verifies it; if anything fails, the current connection stays unchanged. The previous settings are kept so you can switch back with Reconfigure. These are different Gateways: aliases and the LINE login must also be set up in the add-on."
+      },
+      "reconfigure": {
+        "title": "Reconfigure LINE OA",
+        "description": "Choose what to change.",
+        "menu_options": {
+          "reconfigure_external": "External Gateway (experimental)",
+          "reconfigure_addon": "LINE OA add-on (pair again / switch back to the add-on)"
+        }
+      },
+      "reconfigure_external": {
+        "title": "External Gateway (experimental)",
+        "description": "Experimental: use an external Gateway on LXC / Docker / Linux. Enter the Gateway URL and API key (required when switching from the add-on). Entities and automations are kept; you can switch back to the add-on at any time.",
+        "data": {
+          "url": "Gateway URL",
+          "api_key": "API key"
+        },
+        "data_description": {
+          "url": "Base URL of the Gateway, for example http://192.168.1.50:8790",
+          "api_key": "New Gateway API key. Leave empty to keep the current key."
+        }
+      },
+      "reconfigure_addon": {
+        "title": "Pair with the add-on",
+        "description": "Pair Home Assistant with the add-on \"{addon}\" (currently connected to {url}).\n\nIf the add-on is already paired, first press \"Allow Home Assistant pairing\" (reset pairing) in the add-on Web UI, then submit."
+      },
+      "reauth_confirm": {
+        "title": "Gateway API key rejected",
+        "description": "The LINE OA Gateway at {url} rejected the API key. Enter a valid Gateway API key. (If only the LINE login expired, sign in again in the Gateway Web UI instead.)",
+        "data": {
+          "api_key": "API key"
+        },
+        "data_description": {
+          "api_key": "Gateway API key created in the Gateway Web UI. This is not a LINE password."
+        }
+      },
+      "reauth_addon": {
+        "title": "Pair again with the add-on",
+        "description": "The add-on no longer accepts Home Assistant's API key.\n\nOpen the LINE OA add-on Web UI, press \"Allow Home Assistant pairing\" (reset pairing), then submit. You never need to copy an API key. (If only the LINE login expired, sign in again in the add-on instead.)"
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the Gateway. Check that it is running.",
+      "invalid_auth": "The Gateway rejected the API key.",
+      "invalid_response": "The Gateway returned an unexpected response (missing instance_id?).",
+      "invalid_url": "Enter a full http:// or https:// URL without credentials, query or fragment.",
+      "incompatible_api": "This Gateway uses an unsupported API version. LINE OA requires Gateway API version 1.",
+      "api_key_required": "Enter the API key of the external Gateway.",
+      "addon_not_found": "The LINE OA add-on is not running or has not announced itself.",
+      "addon_already_paired": "The add-on is already paired. Press \"Allow Home Assistant pairing\" in the add-on Web UI, then try again.",
+      "pairing_expired": "The pairing code expired. Try again; a new one is issued automatically.",
+      "pairing_rejected": "Pairing failed: the add-on rejected the pairing code (invalid, expired or already used). Try again.",
+      "pairing_rate_limited": "Too many pairing attempts. Wait a minute and try again.",
+      "pairing_unavailable": "The add-on does not offer pairing or cannot be reached.",
+      "pairing_failed": "Pairing failed. No credential was saved. Check the add-on log and try again.",
+      "invalid_discovery_info": "The add-on announcement could not be verified.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This Gateway is already configured.",
+      "already_in_progress": "Setup is already in progress.",
+      "single_instance_allowed": "LINE OA is already set up.",
+      "reconfigure_successful": "Re-configuration was successful.",
+      "reauth_successful": "Pairing / re-authentication was successful.",
+      "wrong_gateway": "This URL belongs to a different Gateway (instance_id does not match).",
+      "cannot_connect": "The Gateway does not respond.",
+      "invalid_discovery_info": "The Gateway announcement could not be verified.",
+      "incompatible_api": "The add-on uses an unsupported Gateway API version.",
+      "addon_not_supported": "LINE OA requires the LINE OA add-on, but this Home Assistant installation has no Supervisor (add-ons). Use Home Assistant OS.",
+      "addon_not_found": "No running LINE OA add-on was found. Add the repository {addon_repo} in Settings → Add-ons → Store, install and start the LINE OA add-on, then add the integration again.",
+      "addon_declined": "You chose to keep the current Gateway for this add-on.",
+      "kept_current": "The current connection is kept. You can switch later via Reconfigure.",
+      "migration_successful": "LINE OA now uses the add-on. Entities and automations were kept."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "HA to add-on connection"
+      },
+      "logged_in": {
+        "name": "LINE account login valid"
+      }
+    },
+    "sensor": {
+      "session_status": {
+        "name": "Service status",
+        "state": {
+          "ready": "Connection and login normal",
+          "auth_required": "LINE not logged in",
+          "expired": "LINE login expired",
+          "disconnected": "LINE temporarily unreachable",
+          "error": "LINE verification or permission error",
+          "unknown": "Unknown",
+          "gateway_unreachable": "Add-on unreachable",
+          "pairing_required": "HA pairing required",
+          "status_unavailable": "Cannot read add-on status",
+          "instance_mismatch": "Connected to a different add-on"
+        },
+        "state_attributes": {
+          "account_name": {
+            "name": "Account name"
+          }
+        }
+      },
+      "last_error": {
+        "name": "Last error"
+      }
+    }
+  },
+  "services": {
+    "send_text": {
+      "name": "Send text",
+      "description": "Sends a text message to one LINE recipient alias configured in the LINE OA Gateway.",
+      "fields": {
+        "who": {
+          "name": "Recipient",
+          "description": "Recipient alias configured in the LINE OA Gateway. A single alias only; use a LINE group alias to notify several people."
+        },
+        "message": {
+          "name": "Message",
+          "description": "Text to send. Templates are supported."
+        },
+        "account": {
+          "name": "Account ID",
+          "description": "The account ID created in LINE OA Multi."
+        }
+      }
+    },
+    "send_image": {
+      "name": "Send image",
+      "description": "Sends a JPEG/PNG from a Home Assistant file or public image URL to one recipient alias. Images carry no text; use Send text separately.",
+      "fields": {
+        "who": {
+          "name": "Recipient",
+          "description": "Recipient alias configured in the LINE OA Gateway. A single alias only."
+        },
+        "image_path": {
+          "name": "Image path or URL",
+          "description": "Absolute path of a local JPEG/PNG in an allowed directory, or a public HTTP/HTTPS direct image URL. Max 10 MiB. HA downloads remote images into memory and uploads the image bytes to the add-on."
+        },
+        "account": {
+          "name": "Account ID",
+          "description": "The account ID created in LINE OA Multi."
+        }
+      }
+    },
+    "send_screen_shot": {
+      "name": "Send camera screenshot",
+      "description": "Takes a fresh still image from a camera entity and sends it to one LINE recipient alias. The image is kept in memory only and is sent without text.",
+      "fields": {
+        "who": {
+          "name": "Recipient",
+          "description": "Recipient alias configured in the LINE OA Gateway. A single alias only."
+        },
+        "camera_entity": {
+          "name": "Camera",
+          "description": "Camera entity to capture."
+        },
+        "account": {
+          "name": "Account ID",
+          "description": "The account ID created in LINE OA Multi."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "not_loaded": {
+      "message": "The LINE OA integration is not set up or not loaded."
+    },
+    "cannot_connect": {
+      "message": "Cannot connect to the LINE OA Gateway ({error}). The message was not sent."
+    },
+    "gateway_unreachable": {
+      "message": "Cannot reach the LINE OA Gateway: {error}"
+    },
+    "invalid_api_key": {
+      "message": "The LINE OA Gateway rejected the Home Assistant API key. Re-authenticate the integration."
+    },
+    "status_failed": {
+      "message": "Could not read the LINE OA Gateway status: {error}"
+    },
+    "alias_not_found": {
+      "message": "LINE recipient alias \"{who}\" was not found in the LINE OA Gateway."
+    },
+    "line_session_expired": {
+      "message": "The Gateway's LINE login has expired. Sign in again in the Gateway Web UI. The message was not sent."
+    },
+    "line_auth_required": {
+      "message": "The Gateway is not signed in to LINE. Sign in in the Gateway Web UI. The message was not sent."
+    },
+    "line_rejected": {
+      "message": "LINE rejected the message: {reason}"
+    },
+    "rate_limited": {
+      "message": "Too many requests to the LINE OA Gateway; try again later (retry after: {retry_after}). The message was not sent."
+    },
+    "gateway_payload_too_large": {
+      "message": "The LINE OA Gateway rejected the image as too large."
+    },
+    "gateway_unavailable": {
+      "message": "The LINE OA Gateway is temporarily unavailable. The message was not sent."
+    },
+    "endpoint_not_found": {
+      "message": "The LINE OA Gateway does not support this API endpoint. Check the Gateway version."
+    },
+    "gateway_rejected_request": {
+      "message": "The LINE OA Gateway rejected the request: {reason}"
+    },
+    "gateway_error": {
+      "message": "LINE OA Gateway error: {error}"
+    },
+    "send_unknown": {
+      "message": "The LINE message send result is unknown; it may already have been sent. Do not retry immediately. (request_id: {request_id})"
+    },
+    "image_path_not_absolute": {
+      "message": "Image path \"{path}\" must be an absolute path, for example /media/snapshot.jpg."
+    },
+    "image_not_found": {
+      "message": "Image file \"{path}\" does not exist or is not a regular file."
+    },
+    "image_path_not_allowed": {
+      "message": "Access to \"{path}\" is not allowed. Use a file inside /media or a directory listed in allowlist_external_dirs."
+    },
+    "image_invalid_format": {
+      "message": "\"{path}\" is not a JPEG or PNG image."
+    },
+    "image_read_failed": {
+      "message": "Could not read image file \"{path}\"."
+    },
+    "image_too_large": {
+      "message": "Image \"{path}\" is larger than 10 MiB."
+    },
+    "camera_not_found": {
+      "message": "Camera entity {entity_id} does not exist."
+    },
+    "camera_unavailable": {
+      "message": "Camera {entity_id} is unavailable."
+    },
+    "camera_image_failed": {
+      "message": "Camera {entity_id} could not provide a current still image. Nothing was sent."
+    },
+    "camera_image_too_large": {
+      "message": "The still image from camera {entity_id} is larger than 10 MiB."
+    },
+    "camera_image_invalid_format": {
+      "message": "Camera {entity_id} returned an unsupported image format ({content_type}); only JPEG and PNG are supported."
+    },
+    "instance_mismatch": {
+      "message": "The Gateway at the configured address has a different instance_id (another or reinstalled Gateway). Use Reconfigure."
+    },
+    "image_url_invalid": {
+      "message": "Enter a valid HTTP or HTTPS image URL without a username, password or fragment."
+    },
+    "image_url_not_allowed": {
+      "message": "The image URL or redirect does not point to a public address, or redirects HTTPS to HTTP."
+    },
+    "image_url_download_failed": {
+      "message": "Could not download the image. Check the image server, TLS certificate and network. Nothing was sent."
+    },
+    "image_url_http_error": {
+      "message": "The image server returned HTTP {status}. Nothing was sent."
+    },
+    "image_url_too_large": {
+      "message": "The downloaded image exceeds 10 MiB. Nothing was sent."
+    },
+    "image_url_invalid_format": {
+      "message": "The URL did not return a JPEG or PNG image. Use a direct image link, not a web page. Nothing was sent."
+    },
+    "image_url_timeout": {
+      "message": "Downloading the image exceeded 20 seconds. Nothing was sent."
+    },
+    "image_url_redirect_limit": {
+      "message": "The image URL redirected more than 3 times. Use the final direct image URL. Nothing was sent."
+    }
+  },
+  "issues": {
+    "line_login_required": {
+      "title": "LINE OA needs you to sign in again",
+      "description": "The LINE login is no longer valid, so LINE notifications cannot be sent. [Open the LINE OA management page]({login_url}), open its Web UI, sign in by scanning the QR code, then press Test connection. This reminder clears after login is verified. Home Assistant pairing is kept; do not pair again."
+    }
+  }
+}

@@ -1,0 +1,52 @@
+name: Development build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gateway:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: line_oa/app/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund && npm test
+        working-directory: line_oa/app
+      - run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} -t line-oa:test line_oa
+      - run: python3 scripts/container-smoke.py --arch ${{ matrix.arch }}
+  hacs:
+    strategy:
+      fail-fast: false
+      matrix:
+        phcc: ["0.13.363", "0.13.372"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: pip install -r requirements_test.txt
+      - run: pip install pytest-homeassistant-custom-component==${{ matrix.phcc }}
+      - run: ruff check custom_components tests
+      - run: ruff format --check custom_components tests
+      - run: mypy
+        if: matrix.phcc == '0.13.372'
+      - run: pytest -q --timeout=30
+      - run: python -m compileall -q custom_components
+      - uses: actions/upload-artifact@v4
+        with:
+          name: line-oa-hacs-development-${{ matrix.phcc }}
+          path: custom_components/line_oa

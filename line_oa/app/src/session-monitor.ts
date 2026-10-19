@@ -1,0 +1,78 @@
+import { randomInt } from 'node:crypto';
+import { LineClient, LineError } from './line-client.js';
+import { SessionManager } from './session.js';
+import { MemoryLogger } from './logger.js';
+
+export const SESSION_IDLE_DELAY_MS = 30 * 60_000;
+export const SESSION_IDLE_JITTER_MS = 30 * 60_000;
+
+export function sessionIdleDelayMs(): number {
+  return SESSION_IDLE_DELAY_MS + randomInt(SESSION_IDLE_JITTER_MS + 1);
+}
+
+/** Checks/recovery use read-only chat APIs and never start QR or send messages. */
+export class SessionMonitor {
+  private timer?: NodeJS.Timeout;
+  private active?: Promise<void>;
+  private stopped = false;
+  private started = false;
+  private generation = 0;
+
+  constructor(private readonly sessions: SessionManager, private readonly client: LineClient,
+    private readonly logger: MemoryLogger, private readonly busy: () => boolean,
+    private readonly nextDelayMs: () => number = sessionIdleDelayMs) {}
+
+  start(): void {
+    if (this.started || this.stopped) return;
+    this.started = true;
+    this.schedule();
+  }
+
+  /** Actual upstream send attempts reset the idle window, including unknown results. */
+  messageSent(): void {
+    if (!this.started || this.stopped) return;
+    ++this.generation;
+    this.schedule();
+  }
+
+  private schedule(): void {
+    clearTimeout(this.timer);
+    const generation = this.generation;
+    this.timer = setTimeout(() => { this.timer = undefined; void this.cycle(generation); }, this.nextDelayMs());
+    this.timer.unref();
+  }
+
+  private async cycle(generation: number): Promise<void> {
+    try { await this.check(); }
+    finally {
+      // A send during a pending check already scheduled a fresh idle window.
+      if (!this.stopped && generation === this.generation) this.schedule();
+    }
+  }
+
+  async check(): Promise<void> {
+    if (this.stopped) return;
+    if (this.active) return this.active;
+    const credentials = this.sessions.getCredentials();
+    // Do not repeatedly call LINE after a confirmed expiry; wait for human login.
+    if (!credentials || this.sessions.getStatus().state === 'EXPIRED' || this.busy()) return;
+    this.active = (async () => {
+      let state: 'CONNECTED' | 'EXPIRED' | 'DISCONNECTED' | 'ERROR' = 'CONNECTED';
+      let code: string | undefined;
+      try { await this.client.validate(); }
+      catch (error) {
+        const kind = error instanceof LineError ? error.kind : 'NETWORK';
+        state = kind === 'AUTH' ? 'EXPIRED' : kind === 'NETWORK' ? 'DISCONNECTED' : 'ERROR';
+        code = error instanceof LineError ? error.code : 'SESSION_VALIDATION_FAILED';
+      }
+      // A pending result must not overwrite logout, a new login, or shutdown.
+      if (this.stopped || this.sessions.getCredentials() !== credentials) return;
+      const changed = this.sessions.getStatus().state !== state;
+      this.sessions.mark(state, state === 'CONNECTED' ? '背景 Session 驗證成功' : `背景驗證失敗：${code}`);
+      if (changed) this.logger.add('SESSION_BACKGROUND_VALIDATE', state === 'CONNECTED' ? 'SUCCESS' : 'FAILED', undefined, code);
+    })();
+    try { await this.active; } finally { this.active = undefined; }
+  }
+
+  stop(): void { this.stopped = true; ++this.generation; clearTimeout(this.timer); }
+}

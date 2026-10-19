@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>LINE OA 多帳號管理</title>
+<link rel="stylesheet" href="multi.css"><script src="multi.js" defer></script>
+</head><body>
+<main>
+ <header><div><h1>LINE OA 多帳號管理</h1><p>單一 Home Assistant Add-on，獨立 LINE Session 與聯絡人</p></div><span id="connection">讀取中</span></header>
+ <p class="warning">此專案使用 LINE 官方帳號後台的非公開聊天 API。可能因 LINE 更新而失效，不適合緊急通知或大量群發。</p>
+ <form id="add"><label for="id">新增帳號別名</label><div class="row"><input id="id" required maxlength="32" pattern="[a-z][a-z0-9_-]{0,31}" placeholder="例如 invest" spellcheck="false" autocomplete="off"><button type="submit">＋ 新增帳號</button></div><small>可隨時新增。名稱不是固定清單；需英文小寫開頭，允許數字、底線、連字號。</small></form>
+ <h2>目前帳號</h2><div id="accounts" class="accounts" role="list"></div>
+ <p id="feedback" role="status" aria-live="polite"></p>
+ <footer><p>每個帳號的「管理／登入」連結都可開啟原作者的 QR 登入與聯絡人介面。HACS 發送時需指定 <code>account</code> 與 <code>who</code>。</p></footer>
+</main>
+</body></html>

@@ -1,0 +1,20 @@
+:root{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",Arial,sans-serif;color-scheme:light dark}
+body{margin:0;background:Canvas;color:CanvasText}
+main{max-width:880px;margin:auto;padding:22px}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px}
+header h1{font-size:1.65rem;margin:0 0 8px}
+header p,small,footer{color:GrayText}
+.warning{border-inline-start:4px solid #d39316;padding:12px 14px;background:color-mix(in srgb,orange 8%,Canvas)}
+form,.account{border:1px solid color-mix(in srgb,GrayText 30%,Canvas);padding:18px;border-radius:12px;margin:12px 0}
+label{display:block;margin-bottom:10px;font-weight:600}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+input{min-width:170px;flex:1;border:1px solid GrayText;border-radius:7px;padding:11px;font:inherit}
+button,.link{font:inherit;padding:10px 14px;border-radius:7px;background:#117e46;color:white;border:0;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+button.secondary{background:#5b6677}
+button:disabled{opacity:.5;cursor:not-allowed}
+.accounts{display:grid;gap:10px}
+.account{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:0;flex-wrap:wrap}
+.account h3{margin:0 0 7px;font-size:1.05rem}.account p{margin:0;color:GrayText;font-size:.9rem}
+.account-actions{display:flex;gap:8px}
+code{font-family:ui-monospace,Consolas,monospace}
+#feedback{min-height:24px}
