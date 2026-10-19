@@ -1,0 +1,40 @@
+name: LINE OA Multi
+version: "0.2.0-dev.1"
+slug: line_oa_multi
+url: https://github.com/TWei-1101/line-oa-multi
+# Locally built addon. Build locally or publish a custom multi-account image.
+description: Dynamic multi-account LINE OA Gateway with isolated sessions
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+stage: experimental
+init: false
+timeout: 30
+ingress: true
+ingress_port: 8099
+ingress_stream: true
+panel_icon: mdi:message-text
+panel_title: LINE OA Multi
+panel_admin: true
+discovery:
+  - line_oa
+hassio_api: false
+homeassistant_api: false
+host_network: false
+apparmor: true
+backup: cold
+backup_exclude:
+  - tmp
+  - tmp/*
+  - cache
+  - cache/*
+  - .cache
+  - .cache/*
+  - logs
+  - logs/*
+  - "*.log"
+options: {}
+schema: {}
+watchdog: http://[HOST]:8787/api/v1/health

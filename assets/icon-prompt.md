@@ -1,0 +1,7 @@
+# Add-on icon provenance
+
+Created with the built-in image_gen tool on 2026-10-17. Style reference: the existing LINE OA HACS `brand/icon@2x.png`. No HACS branding file was changed. The final image is an opaque green speech-bubble/home/bell sibling icon. `sips` only resized exports to 128px and 256px; no Python image editing was used.
+
+## Final prompt
+
+Precisely fix the FIRST image as a flat production app icon. The SECOND image is the original HACS style reference. Keep the first image's excellent white speech bubble + green house + white notification bell geometry, but remove ALL shadows, texture, glow, gradients, noise and transparency. Replace the entire background, including every corner and every gap outside the white speech bubble, with one completely SOLID OPAQUE uniform color #06C755. The entire square canvas must be opaque green right to all four edges, with no holes, no black areas, no transparent areas, no vignette. Use only TWO exact flat colors in the whole image: #06C755 and white #FFFFFF, with crisp anti-aliased edges. Make the white speech bubble similar in scale to the second reference: it occupies about 70 percent of the square's width, centered, with generous 15 percent solid green padding at left and right and a short lower-left speech tail. Inside it keep the green home containing a white bell. This is a clean small application glyph, not a rendering or photograph. Square 1024x1024, no text.

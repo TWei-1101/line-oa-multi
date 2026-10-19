@@ -1,0 +1,24 @@
+{
+  "name": "line-oa-ha-addon",
+  "version": "0.2.0-dev.1",
+  "private": true,
+  "description": "輕量化 LINE Official Account 聊天通知 Gateway",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/multi-server.js",
+    "test": "npm run build && node --test dist/tests/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xangin/line-oa-ha-addon.git"
+  }
+}

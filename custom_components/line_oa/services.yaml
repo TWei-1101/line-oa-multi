@@ -1,0 +1,57 @@
+send_text:
+  fields:
+    account:
+      required: true
+      example: invest
+      selector:
+        text:
+    who:
+      required: true
+      example: simon
+      selector:
+        text:
+    message:
+      required: true
+      example: "洗衣機已完成"
+      selector:
+        text:
+          multiline: true
+
+send_image:
+  fields:
+    account:
+      required: true
+      example: invest
+      selector:
+        text:
+    who:
+      required: true
+      example: simon
+      selector:
+        text:
+    image_path:
+      # Kept for compatibility; accepts either an allowed local path or HTTP(S) URL.
+      required: true
+      example: "/media/snapshot.jpg"
+      selector:
+        text:
+
+send_screen_shot:
+  fields:
+    account:
+      required: true
+      example: invest
+      selector:
+        text:
+    who:
+      required: true
+      example: simon
+      selector:
+        text:
+    camera_entity:
+      required: true
+      example: camera.front_door
+      selector:
+        entity:
+          filter:
+            - domain: camera

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+data/
+runtime/
+secrets/
+*.log
+.DS_Store
+._*

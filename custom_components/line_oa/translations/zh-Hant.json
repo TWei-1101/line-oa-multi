@@ -1,0 +1,289 @@
+{
+  "config": {
+    "flow_title": "LINE OA Gateway（{name}）",
+    "step": {
+      "hassio_confirm": {
+        "title": "確認連線 LINE OA Add-on",
+        "description": "是否將 LINE OA Add-on「{addon}」連接到 Home Assistant？\n\nHome Assistant 會與 Add-on 安全配對並自動取得專用 API Key，不需要輸入 IP、埠或 API Key，也不會發送任何 LINE 訊息。"
+      },
+      "hassio_migrate": {
+        "title": "偵測到 LINE OA Add-on",
+        "description": "偵測到 LINE OA Add-on「{addon}」，但 LINE OA 目前已連接到 {url}。\n\n是否將現有 LINE OA 整合切換至 Add-on 連線？實體、實體 ID 與自動化都會保留。",
+        "menu_options": {
+          "migrate_keep": "保留目前連線",
+          "migrate_switch": "遷移至 Add-on"
+        }
+      },
+      "migrate_switch": {
+        "title": "切換 Gateway",
+        "description": "LINE OA 將從 {url}（instance {old_instance}）切換到 Add-on「{addon}」（instance {new_instance}）。\n\nHome Assistant 會先與 Add-on 配對並驗證；任何步驟失敗都不會改動目前的連線。原本的設定會保留，可透過「重新設定」切回。這是兩個不同的 Gateway：Add-on 內也需要設定別名並登入 LINE。"
+      },
+      "reconfigure": {
+        "title": "重新設定 LINE OA",
+        "description": "請選擇要變更的項目。",
+        "menu_options": {
+          "reconfigure_external": "外部 Gateway（實驗性）",
+          "reconfigure_addon": "LINE OA Add-on（重新配對 / 切換回 Add-on）"
+        }
+      },
+      "reconfigure_external": {
+        "title": "外部 Gateway（實驗性）",
+        "description": "實驗性功能：改用 LXC / Docker / Linux 上的外部 Gateway。請輸入 Gateway 網址與 API Key（從 Add-on 切換過來時 API Key 必填）。實體與自動化會保留，可隨時切回 Add-on。",
+        "data": {
+          "url": "Gateway 網址",
+          "api_key": "API Key"
+        },
+        "data_description": {
+          "url": "Gateway 基本網址，例如 http://192.168.1.50:8790",
+          "api_key": "新的 Gateway API Key；留空則沿用目前的 Key。"
+        }
+      },
+      "reconfigure_addon": {
+        "title": "與 Add-on 配對",
+        "description": "與 Add-on「{addon}」重新配對（目前連線：{url}）。\n\n若 Add-on 已經配對過，請先在 Add-on 的 Web UI 按「允許 Home Assistant 配對」（重設配對），再按提交。"
+      },
+      "reauth_confirm": {
+        "title": "API Key 失效",
+        "description": "位於 {url} 的 LINE OA Gateway 拒絕了目前的 API Key，請輸入有效的 Gateway API Key。（若只是 LINE 登入過期，請改到 Gateway Web UI 重新登入，不需要更換 API Key。）",
+        "data": {
+          "api_key": "API Key"
+        },
+        "data_description": {
+          "api_key": "在 Gateway Web UI 建立的 API Key（不是 LINE 密碼）。"
+        }
+      },
+      "reauth_addon": {
+        "title": "重新配對",
+        "description": "Add-on 已不接受 Home Assistant 的 API Key。\n\n請開啟 LINE OA Add-on 的 Web UI，按「允許 Home Assistant 配對」（重設配對），再按提交，不需要複製任何 API Key。（若只是 LINE 登入過期，請改到 Add-on 內重新登入。）"
+      }
+    },
+    "error": {
+      "cannot_connect": "Gateway 無法連線，請確認 Gateway 正在執行。",
+      "invalid_auth": "Gateway 拒絕此 API Key。",
+      "invalid_response": "Gateway 回應格式不正確（可能缺少 instance_id）。",
+      "invalid_url": "請輸入完整的 http:// 或 https:// 網址，不可包含帳密、查詢字串或錨點。",
+      "incompatible_api": "此 Gateway 的 API 版本不相容。LINE OA 需要 Gateway API 版本 1。",
+      "api_key_required": "請輸入外部 Gateway 的 API Key。",
+      "addon_not_found": "找不到執行中的 LINE OA Add-on。",
+      "addon_already_paired": "Add-on 已經配對過。請先在 Add-on 的 Web UI 按「允許 Home Assistant 配對」，再重試。",
+      "pairing_expired": "配對碼已過期，請重試；系統會自動取得新的配對碼。",
+      "pairing_rejected": "配對失敗：Add-on 拒絕了配對碼（無效、已過期或已使用），請重試。",
+      "pairing_rate_limited": "配對嘗試次數過多，請等一分鐘後再試。",
+      "pairing_unavailable": "Add-on 不支援配對或無法連線。",
+      "pairing_failed": "配對失敗，未儲存任何憑證。請查看 Add-on 日誌後重試。",
+      "invalid_discovery_info": "無法驗證 Add-on 的探索資訊。",
+      "unknown": "發生未預期的錯誤。"
+    },
+    "abort": {
+      "already_configured": "此 Gateway 已經設定過。",
+      "already_in_progress": "設定流程已在進行中。",
+      "single_instance_allowed": "LINE OA 已經設定完成。",
+      "reconfigure_successful": "重新設定成功。",
+      "reauth_successful": "配對成功。",
+      "wrong_gateway": "此網址屬於另一台 Gateway（instance_id 不一致）。",
+      "cannot_connect": "Gateway 無法連線。",
+      "invalid_discovery_info": "無法驗證 Gateway 的探索資訊。",
+      "incompatible_api": "Add-on 的 Gateway API 版本不相容。",
+      "addon_not_supported": "LINE OA 需要 LINE OA Add-on，但此 Home Assistant 安裝方式沒有 Supervisor（Add-on）。請使用 Home Assistant OS。",
+      "addon_not_found": "找不到執行中的 LINE OA Add-on。請先在「設定 → 應用程式／附加元件 → 商店」加入儲存庫 {addon_repo}，安裝並啟動 LINE OA Add-on，再回來新增整合。",
+      "addon_declined": "你已選擇保留目前的 Gateway。",
+      "kept_current": "已保留目前連線。之後可透過「重新設定」切換至 Add-on。",
+      "migration_successful": "已遷移至 Add-on，實體與自動化皆已保留。"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "HA 與 Add-on 連線"
+      },
+      "logged_in": {
+        "name": "LINE 帳號登入有效"
+      }
+    },
+    "sensor": {
+      "session_status": {
+        "name": "服務狀態",
+        "state": {
+          "ready": "連線與登入正常",
+          "auth_required": "LINE 尚未登入",
+          "expired": "LINE 登入已過期",
+          "disconnected": "LINE 暫時無法連線",
+          "error": "LINE 驗證或權限異常",
+          "unknown": "未知",
+          "gateway_unreachable": "Add-on 無法連線",
+          "pairing_required": "HA 需要重新配對",
+          "status_unavailable": "無法讀取 Add-on 狀態",
+          "instance_mismatch": "連到不同的 Add-on"
+        },
+        "state_attributes": {
+          "account_name": {
+            "name": "官方帳號名稱"
+          }
+        }
+      },
+      "last_error": {
+        "name": "最近錯誤"
+      }
+    }
+  },
+  "services": {
+    "send_text": {
+      "name": "傳送文字",
+      "description": "傳送文字訊息給 LINE OA Gateway 中設定的單一接收者別名。",
+      "fields": {
+        "who": {
+          "name": "接收者",
+          "description": "接收者別名，請填寫 LINE OA Gateway 中已設定的別名。只能填一個別名；多人通知請在 LINE 建立群組並設定為單一別名。"
+        },
+        "message": {
+          "name": "訊息",
+          "description": "要傳送的文字，支援 Template。"
+        }
+      }
+    },
+    "send_image": {
+      "name": "傳送圖片",
+      "description": "從 Home Assistant 本機檔案或公開圖片網址取得 JPEG／PNG，傳送給一個收件者別名。圖片不附加文字；文字請使用「傳送文字」。",
+      "fields": {
+        "who": {
+          "name": "接收者",
+          "description": "接收者別名，請填寫 LINE OA Gateway 中已設定的別名。"
+        },
+        "image_path": {
+          "name": "圖片路徑或網址",
+          "description": "HA 本機 JPEG／PNG 絕對路徑，或公開 HTTP／HTTPS 圖片直連網址。最大 10 MiB；外部圖片下載後只在記憶體暫存，由 HA 上傳給 Add-on。"
+        }
+      }
+    },
+    "send_screen_shot": {
+      "name": "傳送攝影機截圖",
+      "description": "從攝影機實體即時擷取一張靜態畫面並傳送給單一接收者別名。圖片只存在記憶體中，不會存成檔案，也不附加文字。",
+      "fields": {
+        "who": {
+          "name": "接收者",
+          "description": "接收者別名，請填寫 LINE OA Gateway 中已設定的別名。"
+        },
+        "camera_entity": {
+          "name": "攝影機",
+          "description": "要擷取畫面的攝影機實體。"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "not_loaded": {
+      "message": "LINE OA 整合尚未設定或尚未載入。"
+    },
+    "cannot_connect": {
+      "message": "無法連線至 LINE OA Gateway（{error}），訊息沒有送出。"
+    },
+    "gateway_unreachable": {
+      "message": "無法連線至 LINE OA Gateway：{error}"
+    },
+    "invalid_api_key": {
+      "message": "LINE OA Gateway 拒絕 Home Assistant 的 API Key，請重新驗證整合。"
+    },
+    "status_failed": {
+      "message": "無法讀取 LINE OA Gateway 狀態：{error}"
+    },
+    "alias_not_found": {
+      "message": "找不到 LINE 接收者別名「{who}」，請確認 LINE OA Gateway 中已設定此別名。"
+    },
+    "line_session_expired": {
+      "message": "LINE 登入已過期，請到 Gateway Web UI 重新登入。訊息沒有送出。"
+    },
+    "line_auth_required": {
+      "message": "Gateway 尚未登入 LINE，請到 Gateway Web UI 登入。訊息沒有送出。"
+    },
+    "line_rejected": {
+      "message": "LINE 明確拒絕此訊息：{reason}"
+    },
+    "rate_limited": {
+      "message": "對 LINE OA Gateway 的請求過於頻繁，請稍後再試（建議等待：{retry_after}）。訊息沒有送出。"
+    },
+    "gateway_payload_too_large": {
+      "message": "LINE OA Gateway 拒絕此圖片：檔案過大。"
+    },
+    "gateway_unavailable": {
+      "message": "LINE OA Gateway 暫時無法服務，訊息沒有送出。"
+    },
+    "endpoint_not_found": {
+      "message": "LINE OA Gateway 不支援此 API，請確認 Gateway 版本。"
+    },
+    "gateway_rejected_request": {
+      "message": "LINE OA Gateway 拒絕此請求：{reason}"
+    },
+    "gateway_error": {
+      "message": "LINE OA Gateway 錯誤：{error}"
+    },
+    "send_unknown": {
+      "message": "LINE 訊息發送結果不明，可能已經送出，請勿立即重試。（request_id：{request_id}）"
+    },
+    "image_path_not_absolute": {
+      "message": "圖片路徑「{path}」必須是絕對路徑，例如 /media/snapshot.jpg。"
+    },
+    "image_not_found": {
+      "message": "圖片「{path}」不存在或不是一般檔案。"
+    },
+    "image_path_not_allowed": {
+      "message": "不允許讀取「{path}」。請使用 /media 內的檔案，或 allowlist_external_dirs 中列出的目錄。"
+    },
+    "image_invalid_format": {
+      "message": "「{path}」不是 JPEG 或 PNG 圖片。"
+    },
+    "image_read_failed": {
+      "message": "無法讀取圖片「{path}」。"
+    },
+    "image_too_large": {
+      "message": "圖片「{path}」超過 10 MiB。"
+    },
+    "camera_not_found": {
+      "message": "攝影機實體 {entity_id} 不存在。"
+    },
+    "camera_unavailable": {
+      "message": "攝影機 {entity_id} 目前無法使用。"
+    },
+    "camera_image_failed": {
+      "message": "攝影機 {entity_id} 無法提供目前的靜態畫面，沒有送出任何內容。"
+    },
+    "camera_image_too_large": {
+      "message": "攝影機 {entity_id} 的畫面超過 10 MiB。"
+    },
+    "camera_image_invalid_format": {
+      "message": "攝影機 {entity_id} 回傳不支援的圖片格式（{content_type}），僅支援 JPEG 與 PNG。"
+    },
+    "instance_mismatch": {
+      "message": "LINE OA Gateway 的 instance_id 與設定不符；可能是另一台 Gateway 或已重新安裝，請使用「重新設定」。"
+    },
+    "image_url_invalid": {
+      "message": "請輸入有效的 HTTP 或 HTTPS 圖片網址；不可包含使用者名稱、密碼或 #片段。"
+    },
+    "image_url_not_allowed": {
+      "message": "圖片網址或重新導向未指向公開網路位址，或將 HTTPS 降為 HTTP。"
+    },
+    "image_url_download_failed": {
+      "message": "無法下載圖片，請檢查圖片伺服器、TLS 憑證與網路。本次尚未發送。"
+    },
+    "image_url_http_error": {
+      "message": "圖片伺服器回傳 HTTP {status}，本次尚未發送。"
+    },
+    "image_url_too_large": {
+      "message": "下載的圖片超過 10 MiB，本次尚未發送。"
+    },
+    "image_url_invalid_format": {
+      "message": "網址回傳的內容不是 JPEG 或 PNG 圖片。請使用圖片直連網址，而非網頁。本次尚未發送。"
+    },
+    "image_url_timeout": {
+      "message": "下載圖片超過 20 秒，本次尚未發送。"
+    },
+    "image_url_redirect_limit": {
+      "message": "圖片網址重新導向超過 3 次，請使用最終圖片直連網址。本次尚未發送。"
+    }
+  },
+  "issues": {
+    "line_login_required": {
+      "title": "LINE OA 需要重新登入",
+      "description": "LINE 登入已失效，目前無法傳送 LINE 通知。請[開啟 LINE OA 管理頁面]({login_url})，進入 Web UI 重新掃碼登入，並按「手動測試連線」。驗證成功後，此提醒會自動清除。Home Assistant 配對資料保留，不需要重新配對。"
+    }
+  }
+}
