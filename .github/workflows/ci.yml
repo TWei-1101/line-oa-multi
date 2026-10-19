@@ -28,6 +28,10 @@ jobs:
       - run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} -t line-oa:test line_oa
       - run: python3 scripts/container-smoke.py --arch ${{ matrix.arch }}
   hacs:
+    strategy:
+      fail-fast: false
+      matrix:
+        phcc: ["0.13.363", "0.13.372"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,11 +39,14 @@ jobs:
         with:
           python-version: '3.14'
       - run: pip install -r requirements_test.txt
+      - run: pip install pytest-homeassistant-custom-component==${{ matrix.phcc }}
       - run: ruff check custom_components tests
       - run: ruff format --check custom_components tests
+      - run: mypy
+        if: matrix.phcc == '0.13.372'
       - run: pytest -q --timeout=30
       - run: python -m compileall -q custom_components
       - uses: actions/upload-artifact@v4
         with:
-          name: line-oa-hacs-development
+          name: line-oa-hacs-development-${{ matrix.phcc }}
           path: custom_components/line_oa

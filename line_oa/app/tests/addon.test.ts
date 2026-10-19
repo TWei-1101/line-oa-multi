@@ -128,7 +128,7 @@ test('actual socket, not forwarded user headers, protects Ingress; API port excl
       assert.equal((await fetch(h.api + path)).status, 404);
     }
     const health = await (await fetch(h.api + '/api/v1/health')).json();
-    assert.deepEqual(health, { status: 'ok', version: '0.1.9', api_version: 1 });
+    assert.deepEqual(health, { status: 'ok', version: '0.2.0-dev.1', api_version: 1 });
     for (const path of ['/api/v1/status', '/api/v1/aliases']) assert.equal((await fetch(h.api + path)).status, 401);
     const b = payload(h.gateway.pairing);
     assert.equal((await fetch(h.api + '/api/v1/pairing/exchange', { method: 'POST', headers: { Origin: 'http://attacker', 'Content-Type': 'application/json' }, body: JSON.stringify(b) })).status, 403);

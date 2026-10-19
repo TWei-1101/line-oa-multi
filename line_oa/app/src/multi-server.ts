@@ -77,6 +77,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
   const running = new Map<string, Gateway>();
   const dedup = new Map<string,RequestDeduplicator<{status:number;body:ReturnType<typeof sendResponse>}>>();
   let mutating = false;
+  const active = new Map<Gateway, number>();
   const webDir = join(dirname(fileURLToPath(import.meta.url)),'..','..','web');
 
   const accountStatus = () => registry.accounts.map(({id,createdAt}) => {
@@ -123,7 +124,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
   async function removeAccount(id:string):Promise<void> {
     const gw=running.get(id);
     if (!gw) throw new Error('ACCOUNT_NOT_FOUND');
-    if (gw.sender.isBusy()) throw new Error('ACCOUNT_SENDING');
+    if (gw.sender.isBusy() || active.get(gw)) throw new Error('ACCOUNT_SENDING');
     // Stop the session monitor before deleting on-disk state.
     await gw.stop();
     const next:Registry={version:1,accounts:registry.accounts.filter(a=>a.id!==id)};
@@ -137,6 +138,17 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
   }
 
   function route(req:IncomingMessage,res:ServerResponse, gw:Gateway, kind:'ui'|'api', url:string):void {
+    if (gw !== control) {
+      active.set(gw, (active.get(gw) ?? 0) + 1);
+      let finished = false;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        const n = (active.get(gw) ?? 1) - 1;
+        if (n) active.set(gw, n); else active.delete(gw);
+      };
+      res.once('finish', done); res.once('close', done);
+    }
     req.url=url;
     if(kind==='ui') gw.uiServer.emit('request',req,res);
     else gw.apiServer.emit('request',req,res);
@@ -182,6 +194,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
       }
       const settings=/^\/api\/accounts\/([a-z][a-z0-9_-]{0,31})\/webhook$/.exec(path);
       if(settings && req.method==='PUT') {
+        if(mutating)return error(res,'ACCOUNT_OPERATION_BUSY',409);
         if(!requireBrowser(req,res,true))return;
         if(!running.has(settings[1]!))return error(res,'ACCOUNT_NOT_FOUND',404);
         const body=await jsonBody(req);

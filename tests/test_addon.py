@@ -238,7 +238,8 @@ async def test_discovery_shows_confirmation_and_pairs_after_consent(
     assert entry.source == SOURCE_HASSIO
     assert entry.unique_id == app.state.instance_id
     assert entry.unique_id != DISCOVERY_UUID
-    assert entry.data == {
+    assert entry.data["line_webhook_id"]
+    assert {k: v for k, v in entry.data.items() if k != "line_webhook_id"} == {
         CONF_URL: gateway_url,
         CONF_API_KEY: app.state.api_key,
         "connection_mode": "addon",
@@ -462,7 +463,7 @@ async def test_add_integration_without_addon_is_honest(hass: HomeAssistant, app:
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "addon_not_found"
     assert result["description_placeholders"] == {
-        "addon_repo": "https://github.com/xangin/line-oa-ha-addon"
+        "addon_repo": "https://github.com/TWei-1101/line-oa-multi"
     }
 
 
@@ -588,7 +589,7 @@ async def test_switch_to_app_keeps_entities_and_actions(
 
     # Existing automations keep working: actions now go to the app.
     await hass.services.async_call(
-        DOMAIN, "send_text", {"who": "simon", "message": "x"}, blocking=True
+        DOMAIN, "send_text", {"account": "alpha", "who": "simon", "message": "x"}, blocking=True
     )
     assert len(app.state.requests) == 1
     assert lxc_entry.lxc_state.requests == []  # type: ignore[attr-defined]

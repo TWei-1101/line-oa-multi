@@ -108,5 +108,3 @@ def register_line_webhook(hass: HomeAssistant, entry: Any) -> None:
             LOGGER.debug("LINE webhook event poll unavailable")
 
     entry.async_on_unload(async_track_time_interval(hass, poll_events, timedelta(seconds=5)))
-    # Queue may contain events received while Home Assistant was restarting.
-    entry.async_create_background_task(hass, poll_events(None), "LINE OA webhook inbox catch-up")

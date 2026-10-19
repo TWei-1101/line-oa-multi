@@ -31,7 +31,7 @@ export interface GatewayOptions {
 
 export async function createGateway(options: GatewayOptions = {}) {
 const dataDir = options.dataDir ?? DATA_DIR;
-const version = '0.1.9';
+const version = '0.2.0-dev.1';
 const startedAt = Date.now();
 const webDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web');
 const { config, warning: configWarning } = await loadConfig(dataDir);

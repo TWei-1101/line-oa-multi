@@ -138,6 +138,10 @@
         "message": {
           "name": "Message",
           "description": "Text to send. Templates are supported."
+        },
+        "account": {
+          "name": "Account ID",
+          "description": "The account ID created in LINE OA Multi."
         }
       }
     },
@@ -152,6 +156,10 @@
         "image_path": {
           "name": "Image path or URL",
           "description": "Absolute path of a local JPEG/PNG in an allowed directory, or a public HTTP/HTTPS direct image URL. Max 10 MiB. HA downloads remote images into memory and uploads the image bytes to the add-on."
+        },
+        "account": {
+          "name": "Account ID",
+          "description": "The account ID created in LINE OA Multi."
         }
       }
     },
@@ -166,6 +174,10 @@
         "camera_entity": {
           "name": "Camera",
           "description": "Camera entity to capture."
+        },
+        "account": {
+          "name": "Account ID",
+          "description": "The account ID created in LINE OA Multi."
         }
       }
     }

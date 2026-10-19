@@ -138,6 +138,10 @@
         "message": {
           "name": "訊息",
           "description": "要傳送的文字，支援 Template。"
+        },
+        "account": {
+          "name": "帳號 ID",
+          "description": "The account ID created in LINE OA Multi."
         }
       }
     },
@@ -152,6 +156,10 @@
         "image_path": {
           "name": "圖片路徑或網址",
           "description": "HA 本機 JPEG／PNG 絕對路徑，或公開 HTTP／HTTPS 圖片直連網址。最大 10 MiB；外部圖片下載後只在記憶體暫存，由 HA 上傳給 Add-on。"
+        },
+        "account": {
+          "name": "帳號 ID",
+          "description": "The account ID created in LINE OA Multi."
         }
       }
     },
@@ -166,6 +174,10 @@
         "camera_entity": {
           "name": "攝影機",
           "description": "要擷取畫面的攝影機實體。"
+        },
+        "account": {
+          "name": "帳號 ID",
+          "description": "The account ID created in LINE OA Multi."
         }
       }
     }
