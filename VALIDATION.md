@@ -9,6 +9,12 @@
 - Ruff code checks/format pass; mypy strict passes for 15 integration modules.
 - Backup/version metadata checks pass. Full publication scanner includes historical upstream docs and is not a release gate for those historical references.
 
+## Verified remotely
+
+- Branch `dev/multi-account-webhook` was uploaded to `TWei-1101/line-oa-multi` at `49967c7eeffb9b3a66fda859bcc45cc9d239f972`.
+- GitHub Actions run https://github.com/TWei-1101/line-oa-multi/actions/runs/39260235941 completed successfully: native amd64 and aarch64 npm tests, Docker builds and container smoke checks all passed; both HACS matrices passed, including Ruff, pytest, compilation and mypy on the newer matrix.
+- The user reported successful QR login and message sending with two live accounts on HAOS. This is user-reported acceptance evidence, not an automated test or an independent device audit.
+
 ## Corrections to the supplied prototype
 
 - Real upstream build replaces fixture-only confidence. Original prototype retained, but its stubs are not runtime dependencies.
@@ -21,10 +27,9 @@
 
 ## Not verified / blocked
 
-- GitHub branch upload: GitHub Contents API returned HTTP 403 “Resource not accessible by integration”. Git push had no usable credentials. Repository metadata permissions are not proof that the installed GitHub App has write permission.
-- Remote GitHub Actions: not run, because no code could be uploaded.
-- Docker images for amd64/aarch64: not built locally (Docker unavailable). CI defines native builds and smoke checks; an unexecuted workflow is not evidence of success.
-- HAOS installation, Supervisor discovery/Ingress on a real appliance, QR login against live LINE, multiple real OA sessions, text/image delivery, LINE Developers webhook verification and resource use remain unverified.
+- Docker images were not built on the handoff workstation because Docker was unavailable; the equivalent native GitHub Actions builds and smoke checks passed.
+- Independent verification of the reported HAOS installation, Supervisor discovery/Ingress, recipient delivery and account isolation has not been performed.
+- LINE Developers webhook verification, invalid-signature/destination behavior on the live endpoint, restart persistence, backup/restore, long-running resource use and destructive account deletion remain unverified on a real appliance.
 
 ## Known limits
 

@@ -1,17 +1,24 @@
-# HAOS development testing — not released for installation yet
+# HAOS development installation
 
-This handoff is a development source snapshot, not a verified HAOS build. Do not treat the historical `prototype/INSTALL-HAOS.md` or upstream installation docs as instructions for this integrated fork.
+This is an experimental build. The GitHub Actions matrix has passed on native amd64 and aarch64 runners, and live two-account login/message sending has been reported. Webhook, backup/restore and long-running production use still require validation. Do not treat the historical `prototype/INSTALL-HAOS.md` or upstream installation docs as instructions for this integrated fork.
 
-The user requested HAOS installation instructions only after build success. Those instructions are therefore deferred until both native container jobs pass on the exact uploaded commit.
+## Install the Add-on
 
-## Required gates
+1. Take a full Home Assistant backup and download a copy off the appliance.
+2. Remove or stop the upstream LINE OA Add-on and integration. This fork uses the same `line_oa` integration domain and must not coexist with it.
+3. In **Settings > Apps/Add-ons > Store > Repositories**, add `https://github.com/TWei-1101/line-oa-multi`.
+4. Refresh the store and install **LINE OA Multi**. Confirm slug `line_oa_multi`, stage `experimental`, version `0.2.0-dev.1`, and architecture amd64 or aarch64.
+5. Start the Add-on and open its Web UI. Add each account with a unique lowercase ID and complete QR login separately.
 
-1. Restore GitHub App repository write access for TWei-1101/line-oa-multi. Its Contents API currently rejects writes with HTTP 403. Workflow writes may also require additional GitHub App permission. Never paste an access token into chat.
-2. Push the prepared `dev/multi-account-webhook` branch; do not overwrite any upstream repository. Keep the project experimental.
-3. Run `.github/workflows/ci.yml` on that commit and inspect both amd64 and aarch64 jobs: npm tests, Docker build, runtime health, private ports, architecture labels, graceful stop, restart and stable identity.
-4. Inspect both HACS jobs (HA 2026.9.0 and 2026.10.1): Ruff, pytest, compilation; mypy runs with HA 2026.10.1.
-5. Record the successful Actions URL and commit SHA in VALIDATION.md. A source compile/test success alone is not a container build success.
-6. Only then provide branch-specific HAOS repository/HACS installation instructions. Confirm the repository's actual default branch and HACS branch availability first; do not assume HACS will install the development branch.
+## Install the HACS integration
+
+1. In HACS, open **Custom repositories**.
+2. Add `https://github.com/TWei-1101/line-oa-multi` and select type **Integration**.
+3. Download **LINE OA Multi (Development)** and restart Home Assistant Core.
+4. With the Add-on running, accept the discovered LINE OA service under **Settings > Devices & services**, or add LINE OA manually.
+5. Confirm `sensor.line_oa_session_status` exists and reports `ready`.
+
+The Add-on Web UI works without the HACS integration, but HA entities, actions, the public Webhook bridge and `line_oa_message` events require the integration.
 
 ## Acceptance plan after those gates
 
