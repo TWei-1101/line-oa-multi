@@ -1,11 +1,11 @@
-# LINE OA Multi — experimental development
+# LINE OA Multi
 
-This repository integrates the complete MIT-licensed xangin LINE OA Add-on and HACS sources with the supplied dynamic-account/Webhook prototype. It is not a rewrite. Two live accounts have been reported working for QR login and message sending on HAOS; Webhook, backup/restore and long-running production use remain acceptance tests.
+This repository integrates the complete MIT-licensed xangin LINE OA Add-on and HACS sources with multi-account and Webhook support. It continues the original project rather than rewriting it. Two live accounts have been verified for QR login and message sending on HAOS; Webhook, backup/restore and long-running production use remain pending real-device validation.
 
 - Add-on upstream: `xangin/line-oa-ha-addon` at `afb9fe582013a50324a8aa9f7e04cfd5d2338000`.
 - HACS upstream: `xangin/line-oa-hacs` at `977980f149e8fc0d4a9f5ccaed3a1455b8c1b904`.
 - Original prototype retained under `prototype/`; its fixture tests are not deployment verification.
-- Upstream LICENSE is retained. Historical upstream docs and workflows are references; the development guide below takes precedence.
+- Upstream LICENSE is retained. Historical upstream docs and workflows are references; the installation guide below takes precedence.
 
 One Add-on manages up to 20 accounts. Each has its own LINE session, cookie jar, contacts, sender and data directory. Gateway API authentication and HA pairing are shared. Explicit `account` is required on HA send actions; account IDs use lowercase letters, digits, underscores and hyphens, starting with a letter (1–32 chars).
 
@@ -44,9 +44,9 @@ Use a test HA instance and test recipients. The sender uses LINE's unofficial ma
 The same repository provides both required parts. They do not replace each other.
 
 1. In the Home Assistant App/Add-on Store repository manager, add `https://github.com/TWei-1101/line-oa-multi`, refresh the store and install **LINE OA Multi**.
-2. In HACS, open **Custom repositories**, add `https://github.com/TWei-1101/line-oa-multi` as type **Integration**, then download **LINE OA Multi (Development)**.
+2. In HACS, open **Custom repositories**, add `https://github.com/TWei-1101/line-oa-multi` as type **Integration**, then download **LINE OA Multi**.
 3. Restart Home Assistant Core. Keep the Add-on running, then accept LINE OA discovery under **Settings > Devices & services**, or add the LINE OA integration manually.
 
 Do not install the upstream `xangin/line-oa-hacs` integration alongside this fork. Both use the `line_oa` domain.
 
-See [INSTALL-HAOS.md](INSTALL-HAOS.md) for development installation, rollback and acceptance checks; [VALIDATION.md](VALIDATION.md) records actual validation status.
+See [INSTALL-HAOS.md](INSTALL-HAOS.md) for installation, rollback and acceptance checks; [VALIDATION.md](VALIDATION.md) records actual validation status.
