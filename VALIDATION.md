@@ -14,6 +14,7 @@
 - Branch `dev/multi-account-webhook` was uploaded to `TWei-1101/line-oa-multi` at `49967c7eeffb9b3a66fda859bcc45cc9d239f972`.
 - GitHub Actions run https://github.com/TWei-1101/line-oa-multi/actions/runs/39260235941 completed successfully: native amd64 and aarch64 npm tests, Docker builds and container smoke checks all passed; both HACS matrices passed, including Ruff, pytest, compilation and mypy on the newer matrix.
 - The user reported successful QR login and message sending with two live accounts on HAOS. This is user-reported acceptance evidence, not an automated test or an independent device audit.
+- The user reported that LINE Developers Webhook verification succeeded on HAOS with Add-on `0.2.0-dev.2` after signed first-contact destination binding replaced the invalid OA Manager/Messaging API ID equivalence assumption.
 
 ## Corrections to the supplied prototype
 
@@ -29,7 +30,7 @@
 
 - Docker images were not built on the handoff workstation because Docker was unavailable; the equivalent native GitHub Actions builds and smoke checks passed.
 - Independent verification of the reported HAOS installation, Supervisor discovery/Ingress, recipient delivery and account isolation has not been performed.
-- A live LINE Developers verification attempt reached the HA endpoint and passed Channel Secret signature verification, but exposed that LINE OA Manager's internal bot ID cannot always be equated with the Messaging API `destination`; `0.2.0-dev.2` now binds the first correctly signed destination and rejects later drift. Successful verification with this fix, invalid-signature/destination behavior on the live endpoint, restart persistence, backup/restore, long-running resource use and destructive account deletion remain unverified on a real appliance.
+- A live LINE Developers verification attempt exposed that LINE OA Manager's internal bot ID cannot always be equated with the Messaging API `destination`; `0.2.0-dev.2` fixed this and the user subsequently reported successful verification. Actual message-event delivery, invalid-signature/destination behavior on the live endpoint, restart persistence, backup/restore, long-running resource use and destructive account deletion remain unverified on a real appliance.
 
 ## Known limits
 
