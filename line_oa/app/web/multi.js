@@ -30,16 +30,27 @@ async function reload(){
           el('feedback').textContent=`已刪除 ${account.id}`;await reload();}
       catch(e){el('feedback').textContent=e.message;del.disabled=false;}
     });
-    const webhookButton=label('button','Webhook 設定');webhookButton.type='button';
+    const currentWebhook=account.webhook||{};
+    const webhookButton=label('button',currentWebhook.enabled?'停用 Webhook':currentWebhook.configured?'啟用 Webhook':'Webhook 設定');webhookButton.type='button';
     webhookButton.className='secondary';
     webhookButton.addEventListener('click',async()=>{
       const current=account.webhook||{};
+      if(current.enabled){
+        if(!confirm(`確定停用 ${account.id} 的官方 LINE Webhook？`))return;
+        webhookButton.disabled=true;
+        try{
+          await request(`api/accounts/${encodeURIComponent(account.id)}/webhook`,{method:'PUT',body:JSON.stringify({enabled:false})});
+          el('feedback').textContent=`${account.id} Webhook 已停用`;
+          await reload();
+        }catch(e){el('feedback').textContent=`Webhook 停用失敗：${e.message}`;}
+        finally{webhookButton.disabled=false;}
+        return;
+      }
       const raw=prompt(`帳號 ${account.id} 的 Channel Secret\n請輸入新 Secret；留空表示沿用已設定的 Secret。\n目前：${current.configured?'已設定':'未設定'}`,'');
       if(raw===null)return;
-      const enabled=confirm(`是否啟用 ${account.id} 的官方 LINE Webhook？\n確定＝啟用，取消＝停用。`);
       webhookButton.disabled=true;
       try{
-        const body={enabled};
+        const body={enabled:true};
         if(raw.trim())body.channel_secret=raw.trim();
         await request(`api/accounts/${encodeURIComponent(account.id)}/webhook`,{method:'PUT',body:JSON.stringify(body)});
         el('feedback').textContent=`${account.id} Webhook 設定已儲存`;

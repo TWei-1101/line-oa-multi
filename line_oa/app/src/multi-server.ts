@@ -246,8 +246,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
         let size=0;
         const chunks:Buffer[]=[];
         for await(const chunk of req){size+=chunk.length;if(size>256*1024)return error(res,'WEBHOOK_TOO_LARGE',413);chunks.push(Buffer.from(chunk));}
-        const result=await webhook.receive(Buffer.concat(chunks),signature,
-          (id)=>running.get(id)?.sessions.getCredentials()?.botId);
+        const result=await webhook.receive(Buffer.concat(chunks),signature);
         return reply(res,200,result);
       }
       if(req.method==='GET' && path==='/api/v1/webhook/events') {

@@ -13,7 +13,7 @@ const MAX_INBOX = 2000;
 const MAX_EVENTS = 100;
 const MAX_BODY = 256 * 1024;
 
-export type HookSettings = { enabled: boolean; channelSecret: string };
+export type HookSettings = { enabled: boolean; channelSecret: string; destination?: string };
 type StoredHooks = { version: 1; accounts: Record<string, HookSettings> };
 export type ReceivedEvent = {
   sequence: number;
@@ -44,7 +44,8 @@ const validSettings = (x: unknown): x is StoredHooks => isObject(x) && x.version
   isObject(x.accounts) && Object.entries(x.accounts).length <= 20 &&
   Object.entries(x.accounts).every(([id, value]) => ACCOUNT.test(id) && isObject(value) &&
     typeof value.enabled === 'boolean' && typeof value.channelSecret === 'string' &&
-    /^[A-Za-z0-9_-]{16,128}$/.test(value.channelSecret));
+    /^[A-Za-z0-9_-]{16,128}$/.test(value.channelSecret) &&
+    (value.destination === undefined || (typeof value.destination === 'string' && DEST.test(value.destination))));
 const validInbox = (x: unknown): x is Inbox => isObject(x) && x.version === 1 &&
   Number.isSafeInteger(x.nextSequence) && (x.nextSequence as number) > 0 &&
   Array.isArray(x.events) && x.events.length <= MAX_INBOX &&
@@ -102,8 +103,14 @@ export class MultiWebhook {
       if (!channelSecret) throw new WebhookError('CHANNEL_SECRET_REQUIRED', 400);
       if (Object.entries(this.settings.accounts).some(([id, cfg]) => id !== account && cfg.channelSecret === channelSecret))
         throw new WebhookError('CHANNEL_SECRET_ALREADY_USED', 409);
+      // A replaced Channel Secret represents a potentially different
+      // Messaging API channel, so its previously learned destination must not
+      // carry over. Enable/disable operations preserve the binding.
+      const destination = old && (secret === undefined || secret === old.channelSecret)
+        ? old.destination : undefined;
       const next = { version: 1 as const, accounts: {
-        ...this.settings.accounts, [account]: { enabled, channelSecret }
+        ...this.settings.accounts,
+        [account]: { enabled, channelSecret, ...(destination ? { destination } : {}) }
       } };
       await atomicWriteJson(join(this.dataDir, 'webhook-settings.json'), next, 0o600);
       this.settings = next;
@@ -121,7 +128,7 @@ export class MultiWebhook {
       this.settings = next;
     });
   }
-  async receive(rawBody: Buffer, signature: string, getBotId: (id: string) => string | undefined): Promise<{accepted: number; duplicates: number}> {
+  async receive(rawBody: Buffer, signature: string): Promise<{accepted: number; duplicates: number}> {
     if (rawBody.length > MAX_BODY) throw new WebhookError('WEBHOOK_TOO_LARGE', 413);
     return this.serialized(async () => {
       // Verify original bytes before parsing. Never trust the inbound destination
@@ -129,12 +136,12 @@ export class MultiWebhook {
       const candidates = Object.entries(this.settings.accounts)
         .filter(([, v]) => v.enabled && verifyLineSignature(v.channelSecret, rawBody, signature));
       if (candidates.length !== 1) throw new WebhookError('INVALID_LINE_SIGNATURE', 401);
-      const account = candidates[0]![0];
+      const [account, settings] = candidates[0]!;
       let packet: unknown;
       try { packet = JSON.parse(rawBody.toString('utf8')); }
       catch { throw new WebhookError('INVALID_LINE_BODY', 400); }
       if (!isObject(packet) || typeof packet.destination !== 'string' || !DEST.test(packet.destination)
-          || packet.destination !== getBotId(account))
+          || (settings.destination !== undefined && packet.destination !== settings.destination))
         throw new WebhookError('LINE_DESTINATION_MISMATCH', 403);
       if (!Array.isArray(packet.events) || packet.events.length > MAX_EVENTS)
         throw new WebhookError('INVALID_LINE_EVENTS', 400);
@@ -165,6 +172,19 @@ export class MultiWebhook {
           is_redelivery: e.deliveryContext?.isRedelivery === true
         });
         accepted++;
+      }
+      // The Channel Secret authenticates the LINE channel. Bind its signed
+      // destination on first contact, then reject any later destination drift.
+      // The unofficial OA Manager session ID is intentionally not used here:
+      // live LINE accounts have shown that it is not always the Messaging API
+      // bot user ID.
+      if (settings.destination === undefined) {
+        const nextSettings: StoredHooks = { version: 1, accounts: {
+          ...this.settings.accounts,
+          [account]: { ...settings, destination: packet.destination }
+        } };
+        await atomicWriteJson(join(this.dataDir, 'webhook-settings.json'), nextSettings, 0o600);
+        this.settings = nextSettings;
       }
       // Durable enqueue before returning 2xx. Bounded inbox stores last 2000.
       if (accepted) {

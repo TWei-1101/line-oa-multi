@@ -13,14 +13,18 @@ test('webhook verifies raw bytes, destination, deduplicates concurrent and resta
  const dir=await mkdtemp(join(tmpdir(),'multi-hook-'));
  try {
   let hook=new MultiWebhook(dir);await hook.load();await hook.set('alpha',true,secret);
+  const verify=Buffer.from(JSON.stringify({destination:bot,events:[]}));
   const raw=Buffer.from(JSON.stringify({destination:bot,events:[{webhookEventId:'event-00000001',type:'message',message:{type:'text',text:'hello'}}]}));
-  await assert.rejects(hook.receive(raw,'invalid',()=>bot),/INVALID_LINE_SIGNATURE/);
-  await assert.rejects(hook.receive(raw,signature(raw),()=>undefined),/LINE_DESTINATION_MISMATCH/);
-  const results=await Promise.all([hook.receive(raw,signature(raw),()=>bot),hook.receive(raw,signature(raw),()=>bot)]);
+  await assert.rejects(hook.receive(verify,'invalid'),/INVALID_LINE_SIGNATURE/);
+  assert.deepEqual(await hook.receive(verify,signature(verify)),{accepted:0,duplicates:0});
+  const other=Buffer.from(JSON.stringify({destination:'U'+'c'.repeat(32),events:[]}));
+  await assert.rejects(hook.receive(other,signature(other)),/LINE_DESTINATION_MISMATCH/);
+  const results=await Promise.all([hook.receive(raw,signature(raw)),hook.receive(raw,signature(raw))]);
   assert.equal(results.reduce((n,r)=>n+r.accepted,0),1);
   assert.equal(results.reduce((n,r)=>n+r.duplicates,0),1);
   hook=new MultiWebhook(dir);await hook.load();
-  assert.equal((await hook.receive(raw,signature(raw),()=>bot)).duplicates,1);
+  assert.equal((await hook.receive(raw,signature(raw))).duplicates,1);
+  await assert.rejects(hook.receive(other,signature(other)),/LINE_DESTINATION_MISMATCH/);
   assert.equal(hook.events(0).events[0]?.text,'hello');
   assert.equal(hook.events(1).events.length,0);
   await hook.remove('alpha');assert.equal(hook.events(0).events.length,0);

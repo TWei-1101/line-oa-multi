@@ -7,7 +7,7 @@ This is an experimental build. The GitHub Actions matrix has passed on native am
 1. Take a full Home Assistant backup and download a copy off the appliance.
 2. Remove or stop the upstream LINE OA Add-on and integration. This fork uses the same `line_oa` integration domain and must not coexist with it.
 3. In **Settings > Apps/Add-ons > Store > Repositories**, add `https://github.com/TWei-1101/line-oa-multi`.
-4. Refresh the store and install **LINE OA Multi**. Confirm slug `line_oa_multi`, stage `experimental`, version `0.2.0-dev.1`, and architecture amd64 or aarch64.
+4. Refresh the store and install **LINE OA Multi**. Confirm slug `line_oa_multi`, stage `experimental`, version `0.2.0-dev.2`, and architecture amd64 or aarch64.
 5. Start the Add-on and open its Web UI. Add each account with a unique lowercase ID and complete QR login separately.
 
 ## Install the HACS integration
@@ -23,11 +23,11 @@ The Add-on Web UI works without the HACS integration, but HA entities, actions, 
 ## Acceptance plan after those gates
 
 - Take a full HA backup and save existing LINE integration configuration. Use a test HA instance where possible. The integration's domain is line_oa and replaces, rather than coexists with, the upstream HACS integration.
-- Verify the Add-on is named LINE OA Multi, slug line_oa_multi, stage experimental, version 0.2.0-dev.1, without an upstream `image:` reference.
+- Verify the Add-on is named LINE OA Multi, slug line_oa_multi, stage experimental, version `0.2.0-dev.2`, without an upstream `image:` reference.
 - Verify Supervisor discovery pairs to the Multi instance; open Ingress, add alpha/beta, scan each account's QR separately, and confirm the bot identity and contact aliases never cross.
 - Send one text and one image to a confirmed test recipient from each account using explicit account IDs; check submission state and actual recipient delivery independently.
 - Restart Add-on and HA; confirm registry, sessions, aliases and pairing persist.
-- Configure unique Channel Secrets and external HTTPS webhook URLs from the status sensor's webhook_path. LINE destination must match the logged-in OA bot ID. Test correct signature, modified body, wrong secret, wrong destination and redelivery.
+- Configure unique Channel Secrets and external HTTPS webhook URLs from the status sensor's webhook_path. The first valid signed request binds the Messaging API destination independently of the OA Manager session ID; later destination changes are rejected. Test correct signature, modified body, wrong secret, wrong destination and redelivery.
 - Listen for line_oa_message in Developer Tools; check account attribution and event IDs. Verify restart does not replay a retained event already consumed under normal operation.
 - Delete only a disposable test account; verify another account is unaffected. Test backup/restore before using real accounts.
 

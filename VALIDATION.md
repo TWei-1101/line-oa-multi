@@ -3,7 +3,7 @@
 ## Verified locally
 
 - Complete upstream Add-on sources at afb9fe582013a50324a8aa9f7e04cfd5d2338000 integrated using the supplied patch script; complete HACS runtime sources and upstream tests at 977980f149e8fc0d4a9f5ccaed3a1455b8c1b904 integrated.
-- Node 24 / TypeScript strict build and upstream plus real multi-gateway tests: 80 passed. Includes actual HTTP Ingress denial, CSRF, child UI routing, shared pairing identity, independent account directories, registry restart/delete, raw signature verification, destination rejection, concurrent deduplication and inbox restart.
+- Node 24 / TypeScript strict build and upstream plus real multi-gateway tests: 80 passed. Includes actual HTTP Ingress denial, CSRF, child UI routing, shared pairing identity, independent account directories, registry restart/delete, raw signature verification, signed first-contact destination binding, later destination rejection, concurrent deduplication and inbox restart.
 - Home Assistant 2026.9.0: 244 passed (Python 3.14.8, pytest-homeassistant-custom-component 0.13.363).
 - Home Assistant 2026.10.1: 244 passed (Python 3.14.8, pytest-homeassistant-custom-component 0.13.372).
 - Ruff code checks/format pass; mypy strict passes for 15 integration modules.
@@ -29,7 +29,7 @@
 
 - Docker images were not built on the handoff workstation because Docker was unavailable; the equivalent native GitHub Actions builds and smoke checks passed.
 - Independent verification of the reported HAOS installation, Supervisor discovery/Ingress, recipient delivery and account isolation has not been performed.
-- LINE Developers webhook verification, invalid-signature/destination behavior on the live endpoint, restart persistence, backup/restore, long-running resource use and destructive account deletion remain unverified on a real appliance.
+- A live LINE Developers verification attempt reached the HA endpoint and passed Channel Secret signature verification, but exposed that LINE OA Manager's internal bot ID cannot always be equated with the Messaging API `destination`; `0.2.0-dev.2` now binds the first correctly signed destination and rejects later drift. Successful verification with this fix, invalid-signature/destination behavior on the live endpoint, restart persistence, backup/restore, long-running resource use and destructive account deletion remain unverified on a real appliance.
 
 ## Known limits
 
