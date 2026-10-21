@@ -10,7 +10,13 @@
  <p class="warning">此專案使用 LINE 官方帳號後台的非公開聊天 API。可能因 LINE 更新而失效，不適合緊急通知或大量群發。</p>
  <form id="add"><label for="id">新增帳號別名</label><div class="row"><input id="id" required maxlength="32" pattern="[a-z][a-z0-9_-]{0,31}" placeholder="例如 invest" spellcheck="false" autocomplete="off"><button type="submit">＋ 新增帳號</button></div><small>可隨時新增。名稱不是固定清單；需英文小寫開頭，允許數字、底線、連字號。</small></form>
  <h2>目前帳號</h2><div id="accounts" class="accounts" role="list"></div>
+ <section class="bridge"><h2>OpenClaw 橋接</h2>
+ <p>由 HA 接收 LINE 訊息，交給 Mac 上的 OpenClaw，回答透過此 Add-on 發送。</p>
+ <div class="row"><button id="claw-settings" type="button">連線設定</button><button id="claw-refresh" class="secondary" type="button">更新工作狀態</button></div>
+ <p id="claw-status" role="status"></p><div id="claw-jobs"></div>
+ </section>
  <p id="feedback" role="status" aria-live="polite"></p>
  <footer><p>每個帳號的「管理／登入」連結都可開啟原作者的 QR 登入與聯絡人介面。HACS 發送時需指定 <code>account</code> 與 <code>who</code>。</p></footer>
 </main>
+<dialog id="claw-dialog"><form id="claw-form"><h2 id="claw-title"></h2><div id="claw-fields"></div><p id="claw-error" role="alert"></p><div class="row"><button type="submit">儲存</button><button type="button" id="claw-cancel" class="secondary">取消</button></div></form></dialog>
 </body></html>

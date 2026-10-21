@@ -21,6 +21,7 @@ export type ReceivedEvent = {
   webhook_event_id: string;
   type: string;
   message_type?: string;
+  message_id?: string;
   text?: string;
   source_type?: string;
   user_id?: string;
@@ -35,7 +36,7 @@ type HookLineEvent = {
   type?: unknown;
   timestamp?: unknown;
   deliveryContext?: { isRedelivery?: unknown };
-  message?: { type?: unknown; text?: unknown };
+  message?: { type?: unknown; text?: unknown; id?: unknown };
   source?: { type?: unknown; userId?: unknown; groupId?: unknown; roomId?: unknown };
 };
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -70,7 +71,8 @@ export class MultiWebhook {
   private settings: StoredHooks = { version: 1, accounts: {} };
   private inbox: Inbox = { version: 1, nextSequence: 1, events: [] };
   private pending: Promise<void> = Promise.resolve();
-  constructor(private readonly dataDir: string) {}
+  constructor(private readonly dataDir: string,
+    private readonly enqueue?: (events: ReceivedEvent[]) => void) {}
   async load(): Promise<void> {
     const a = await readJsonSafe<StoredHooks>(join(this.dataDir, 'webhook-settings.json'),
       { version: 1, accounts: {} }, validSettings);
@@ -148,6 +150,7 @@ export class MultiWebhook {
       const next: Inbox = { version: 1, nextSequence: this.inbox.nextSequence, events: [...this.inbox.events] };
       const known = new Set(next.events.map(v => `${v.account}:${v.webhook_event_id}`));
       let accepted = 0, duplicates = 0;
+      const fresh: ReceivedEvent[] = [];
       for (const value of packet.events) {
         if (!isObject(value)) throw new WebhookError('INVALID_LINE_EVENTS', 400);
         const e = value as HookLineEvent;
@@ -159,10 +162,11 @@ export class MultiWebhook {
         known.add(key);
         const src = e.source;
         const msg = e.message;
-        next.events.push({
+        const received: ReceivedEvent = {
           sequence: next.nextSequence++, account, webhook_event_id: e.webhookEventId,
           type: e.type,
           ...(typeof msg?.type === 'string' ? {message_type: msg.type.slice(0,32)} : {}),
+          ...(typeof msg?.id === 'string' && /^[0-9]{1,64}$/.test(msg.id) ? {message_id:msg.id} : {}),
           ...(msg?.type === 'text' && typeof msg.text === 'string' ? {text: msg.text.slice(0,5000)} : {}),
           ...(typeof src?.type === 'string' ? {source_type:src.type.slice(0,32)} : {}),
           ...(typeof src?.userId === 'string' ? {user_id:src.userId.slice(0,128)} : {}),
@@ -170,7 +174,9 @@ export class MultiWebhook {
           ...(typeof src?.roomId === 'string' ? {room_id:src.roomId.slice(0,128)} : {}),
           ...(typeof e.timestamp === 'number' && Number.isSafeInteger(e.timestamp) ? {timestamp:e.timestamp} : {}),
           is_redelivery: e.deliveryContext?.isRedelivery === true
-        });
+        };
+        next.events.push(received);
+        fresh.push(received);
         accepted++;
       }
       // The Channel Secret authenticates the LINE channel. Bind its signed
@@ -188,12 +194,23 @@ export class MultiWebhook {
       }
       // Durable enqueue before returning 2xx. Bounded inbox stores last 2000.
       if (accepted) {
+        // Bridge commits first. If the inbox write then fails, LINE can retry:
+        // the bridge's durable event IDs prevent a second enqueue/send.
+        this.enqueue?.(fresh);
         next.events = next.events.slice(-MAX_INBOX);
         await atomicWriteJson(join(this.dataDir, 'webhook-inbox.json'), next, 0o600);
         this.inbox = next;
       }
       return {accepted, duplicates};
     });
+  }
+  recentSources(account: string): Array<{source_type: string; source_id: string}> {
+    const result = new Map<string,{source_type:string;source_id:string}>();
+    for (const e of this.inbox.events.filter(e=>e.account===account).slice(-100).reverse()) {
+      const id=e.source_type==='group'?e.group_id:e.source_type==='room'?e.room_id:e.user_id;
+      if (id && e.source_type) result.set(`${e.source_type}:${id}`,{source_type:e.source_type,source_id:id});
+    }
+    return [...result.values()];
   }
   events(after: number): {events: ReceivedEvent[]; last_sequence: number; oldest_sequence: number} {
     if (!Number.isSafeInteger(after) || after < 0) throw new WebhookError('INVALID_CURSOR',400);

@@ -14,6 +14,7 @@ import { readJsonSafe, atomicWriteJson, ensurePrivateDir } from './storage.js';
 import { trustedIngress, ingressPath, ingressMutationAllowed } from './ingress.js';
 import { parseRequestId, requestFingerprint, RequestDeduplicator, sendResponse } from './api-v1.js';
 import { MultiWebhook, WebhookError } from './webhook.js';
+import { OpenClawBridge, BridgeError } from './openclaw.js';
 
 const NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAX_ACCOUNTS = 20;
@@ -65,7 +66,8 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
   const rootDir = join(dataDir,'multi');
   const accountDir = join(rootDir,'accounts');
   const registryPath = join(rootDir,'accounts.json');
-  const webhook = new MultiWebhook(rootDir);
+  let bridge: OpenClawBridge | undefined;
+  const webhook = new MultiWebhook(rootDir,events=>bridge?.enqueue(events));
   await webhook.load();
   await ensurePrivateDir(rootDir);
   await ensurePrivateDir(accountDir);
@@ -108,6 +110,13 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
     await control.stop();
     throw e;
   }
+  bridge = new OpenClawBridge(rootDir,{
+    sender:account=>running.get(account)?.sender,
+    hasAlias:(account,who)=>!!running.get(account)?.contacts.resolve(who)
+  });
+  try { await bridge.load(); }
+  catch(e) { for(const gw of running.values())await gw.stop();await control.stop();throw e; }
+  const openclaw=bridge;
 
   async function addAccount(id: string): Promise<void> {
     if (!NAME.test(id)) throw new Error('INVALID_ACCOUNT');
@@ -125,6 +134,8 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
     const gw=running.get(id);
     if (!gw) throw new Error('ACCOUNT_NOT_FOUND');
     if (gw.sender.isBusy() || active.get(gw)) throw new Error('ACCOUNT_SENDING');
+    if (openclaw.hasOutstanding(id)) throw new BridgeError('OPENCLAW_JOBS_PENDING',409);
+    openclaw.removeAccount(id);
     // Stop the session monitor before deleting on-disk state.
     await gw.stop();
     const next:Registry={version:1,accounts:registry.accounts.filter(a=>a.id!==id)};
@@ -178,6 +189,31 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
         return res.end(buf);
       }
       if(['/api/auth/session','/api/auth/logout','/api/pairing/status','/api/pairing/reset'].includes(path)) return route(req,res,control,'ui',req.url??path);
+      if(path==='/api/openclaw' && ['GET','PUT'].includes(req.method??'')) {
+        if(!requireBrowser(req,res,req.method==='PUT'))return;
+        if(req.method==='PUT')openclaw.configure(await jsonBody(req));
+        return reply(res,200,openclaw.status());
+      }
+      const claw=/^\/api\/accounts\/([a-z][a-z0-9_-]{0,31})\/openclaw$/.exec(path);
+      if(claw && ['GET','PUT'].includes(req.method??'')) {
+        if(!requireBrowser(req,res,req.method==='PUT'))return;
+        const id=claw[1]!, gw=running.get(id);
+        if(!gw)return error(res,'ACCOUNT_NOT_FOUND',404);
+        if(req.method==='PUT') {
+          const body=await jsonBody(req);
+          if(body.enabled && !webhook.status(id).enabled)return error(res,'WEBHOOK_NOT_ENABLED',409);
+          openclaw.configure(body,id);
+        }
+        return reply(res,200,{...openclaw.status(id),aliases:gw.contacts.listAliases(),sources:webhook.recentSources(id)});
+      }
+      const review=/^\/api\/openclaw\/jobs\/([a-f0-9]{64})$/.exec(path);
+      if(review && req.method==='POST') {
+        if(!requireBrowser(req,res,true))return;
+        const body=await jsonBody(req);
+        if(!['retry','skip','mark_submitted'].includes(String(body.action)))return error(res,'INVALID_JOB_ACTION');
+        openclaw.review(review[1]!,body.action as 'retry'|'skip'|'mark_submitted');
+        return reply(res,200,{ok:true});
+      }
       if(path==='/api/accounts') {
         if(!requireBrowser(req,res,req.method!=='GET'))return;
         if(req.method==='GET')return reply(res,200,{accounts:accountStatus()});
@@ -225,6 +261,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
     }catch(e){
       const code=e instanceof Error && /^[A-Z][A-Z0-9_]{1,80}$/.test(e.message)?e.message:'INTERNAL_ERROR';
       if(e instanceof WebhookError)return error(res,e.code,e.status);
+      if(e instanceof BridgeError)return error(res,e.code,e.status);
       return error(res,code,['INVALID_JSON','INVALID_ACCOUNT','BODY_TOO_LARGE'].includes(code)?400:
         ['ACCOUNT_EXISTS','ACCOUNT_LIMIT','ACCOUNT_SENDING'].includes(code)?409:
         code==='ACCOUNT_NOT_FOUND'?404:500);
@@ -254,10 +291,11 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
         return reply(res,200,webhook.events(cursor===null?0:Number(cursor)));
       }
       if(req.method==='GET'&&path==='/api/v1/accounts')return reply(res,200,{accounts:accountStatus()});
+      if(req.method==='GET'&&path==='/api/v1/openclaw/status')return reply(res,200,openclaw.status());
       if(req.method==='GET'&&path==='/api/v1/status'&&!url.searchParams.has('account')){
         const states=accountStatus();
         const online=states.some(x=>x.logged_in);
-        return reply(res,200,{instance_id:controlConfig.instanceId,api_version:1,version:'0.2.0-dev.2',
+        return reply(res,200,{instance_id:controlConfig.instanceId,api_version:1,version:'0.3.0-dev.1',
           gateway_status:'running',line_logged_in:online,session_status:online?'ready':'auth_required',
           account_name:'LINE OA Multi',last_error:null,updated_at:new Date().toISOString(),
           accounts_count:states.length,accounts_connected:states.filter(x=>x.logged_in).length});
@@ -298,6 +336,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
     }catch(e){
       const code=e instanceof Error&&/^[A-Z][A-Z0-9_]{1,80}$/.test(e.message)?e.message:'INTERNAL_ERROR';
       if(e instanceof WebhookError)return error(res,e.code,e.status);
+      if(e instanceof BridgeError)return error(res,e.code,e.status);
       return error(res,code,code.startsWith('INVALID_')?400:code==='REQUEST_ID_CONFLICT'?409:500);
     }
   });
@@ -316,6 +355,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
       try {await listen(apiServer,apiPort);await listen(uiServer,uiPort);}
       catch(e){await this.stop();throw e;}
       control.discovery?.start();
+      openclaw.start();
     },
     stop():Promise<void>{
       if(stopping)return stopping;
@@ -325,6 +365,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
           server.close(()=>resolve());server.closeIdleConnections();
         });
         await Promise.all([close(uiServer),close(apiServer)]);
+        await openclaw.stop();
         for(const gw of running.values())await gw.stop();
         await control.stop();
       })();

@@ -44,8 +44,16 @@ test('real multi gateway enforces Ingress/CSRF, isolates accounts, restores regi
   const auth=await fetch(ui+'/api/auth/session',{headers});
   const data=await auth.json() as {csrfToken:string};headers.Cookie=auth.headers.get('set-cookie')!.split(';')[0]!;
   assert.equal((await fetch(ui+'/api/accounts',{method:'POST',headers,body:'{"id":"alpha"}'})).status,403);
+  assert.equal((await fetch(ui+'/api/openclaw',{method:'PUT',headers,body:'{}'})).status,403);
   headers['X-CSRF-Token']=data.csrfToken;headers['Content-Type']='application/json';
   for(const id of ['alpha','beta'])assert.equal((await fetch(ui+'/api/accounts',{method:'POST',headers,body:JSON.stringify({id})})).status,201);
+  assert.equal((await fetch(api+'/api/v1/openclaw/status')).status,401);
+  const bridgeSettings=await fetch(ui+'/api/openclaw',{headers});assert.equal(bridgeSettings.status,200);
+  assert.equal((await bridgeSettings.json() as {token_configured:boolean}).token_configured,false);
+  assert.equal((await fetch(ui+'/api/openclaw',{method:'PUT',headers,body:JSON.stringify({url:'http://mac.local:18790/v1/responses',token:'private-mac-token'})})).status,200);
+  assert.ok(!(await (await fetch(ui+'/api/openclaw',{headers})).text()).includes('private-mac-token'));
+  assert.equal((await fetch(ui+'/api/accounts/alpha/openclaw',{headers})).status,200);
+  assert.equal((await fetch(ui+'/api/accounts/alpha/openclaw',{method:'PUT',headers,body:JSON.stringify({enabled:true,routes:[]})})).status,409);
   assert.equal((await fetch(ui+'/api/accounts',{method:'POST',headers,body:'{"id":"../escape"}'})).status,400);
   assert.equal((await fetch(api+'/api/v1/accounts')).status,401);
   const pair=await fetch(ui+'/accounts/alpha/api/pairing/status',{headers});assert.equal(pair.status,200);

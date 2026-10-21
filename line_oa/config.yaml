@@ -1,5 +1,5 @@
 name: LINE OA Multi
-version: "0.2.0-dev.2"
+version: "0.3.0-dev.1"
 slug: line_oa_multi
 url: https://github.com/TWei-1101/line-oa-multi
 # Locally built addon. Build locally or publish a custom multi-account image.

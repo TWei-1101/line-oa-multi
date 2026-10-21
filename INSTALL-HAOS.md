@@ -7,7 +7,7 @@ This is an experimental build. The GitHub Actions matrix has passed on native am
 1. Take a full Home Assistant backup and download a copy off the appliance.
 2. Remove or stop the upstream LINE OA Add-on and integration. This fork uses the same `line_oa` integration domain and must not coexist with it.
 3. In **Settings > Apps/Add-ons > Store > Repositories**, add `https://github.com/TWei-1101/line-oa-multi`.
-4. Refresh the store and install **LINE OA Multi**. Confirm slug `line_oa_multi`, stage `experimental`, version `0.2.0-dev.2`, and architecture amd64 or aarch64.
+4. Refresh the store and install **LINE OA Multi**. Confirm slug `line_oa_multi`, stage `experimental`, version `0.3.0-dev.1`, and architecture amd64 or aarch64. For this new version, confirm the exact commit's GitHub Actions passed before updating; earlier build evidence does not validate the new bridge.
 5. Start the Add-on and open its Web UI. Add each account with a unique lowercase ID and complete QR login separately.
 
 ## Install the HACS integration
@@ -20,10 +20,14 @@ This is an experimental build. The GitHub Actions matrix has passed on native am
 
 The Add-on Web UI works without the HACS integration, but HA entities, actions, the public Webhook bridge and `line_oa_message` events require the integration.
 
+For **HA Webhook → Mac OpenClaw → OA Multi** automatic replies, use the optional
+[OpenClaw setup guide](docs/OPENCLAW.md). Existing HACS installations need no new
+automation; the new bridge/settings run inside the Add-on and start disabled.
+
 ## Acceptance plan after those gates
 
 - Take a full HA backup and save existing LINE integration configuration. Use a test HA instance where possible. The integration's domain is line_oa and replaces, rather than coexists with, the upstream HACS integration.
-- Verify the Add-on is named LINE OA Multi, slug line_oa_multi, stage experimental, version `0.2.0-dev.2`, without an upstream `image:` reference.
+- Verify the Add-on is named LINE OA Multi, slug line_oa_multi, stage experimental, version `0.3.0-dev.1`, without an upstream `image:` reference.
 - Verify Supervisor discovery pairs to the Multi instance; open Ingress, add alpha/beta, scan each account's QR separately, and confirm the bot identity and contact aliases never cross.
 - Send one text and one image to a confirmed test recipient from each account using explicit account IDs; check submission state and actual recipient delivery independently.
 - Restart Add-on and HA; confirm registry, sessions, aliases and pairing persist.

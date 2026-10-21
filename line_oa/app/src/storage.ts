@@ -38,8 +38,12 @@ export async function atomicWriteJson(path: string, value: unknown, mode = 0o600
     await chmod(temp, mode);
     try {
       await rename(temp, path);
-      const directory = await open(dirname(path), 'r');
-      try { await directory.sync(); } finally { await directory.close(); }
+      // Windows doesn't support fsync on directory handles. File contents are
+      // still synced above; production Linux also persists the directory entry.
+      if (process.platform !== 'win32') {
+        const directory = await open(dirname(path), 'r');
+        try { await directory.sync(); } finally { await directory.close(); }
+      }
     } catch (error) { await unlink(temp).catch(() => undefined); throw error; }
   });
   writes.set(path, current.catch(() => undefined));

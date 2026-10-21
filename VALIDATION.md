@@ -1,5 +1,24 @@
 # Validation record — 2026-10-19
 
+## OpenClaw bridge — 2026-10-21
+
+- Add-on `0.3.0-dev.1` adds optional per-account OpenClaw Responses bridging,
+  incoming image download, ordered text/image output, durable SQLite jobs,
+  retained incomplete/uncertain results, and Ingress/CSRF-protected configuration.
+- Node 24.19.0 / strict TypeScript build passed locally. All 10 new bridge/Mac
+  adapter tests and both multi-gateway tests passed (12 targeted tests), covering
+  signed admission, duplicate/restart suppression, own-account image credentials,
+  exact long Unicode text reconstruction, image order, preflight retry, uncertain
+  sends, queue backpressure, private media-root enforcement and secret redaction.
+- Native Windows full suite: 85 passed / 5 failed. These failures concern existing
+  POSIX mode assertions (Windows doesn't represent 0600/0700) and the existing
+  API-key revocation directory fsync. Linux CI is the deployment gate; the new
+  bridge's local pass does not override failures on the target platform.
+- Exact-commit Linux amd64/aarch64 builds and container smoke checks: pending.
+- Real Mac/HAOS/LINE end-to-end, installed OpenClaw API compatibility, Mac image
+  tools/paths, launchd startup, sleep/offline recovery and recipient delivery:
+  **pending device validation**. No live LINE message was sent in these tests.
+
 ## Verified locally
 
 - Complete upstream Add-on sources at afb9fe582013a50324a8aa9f7e04cfd5d2338000 integrated using the supplied patch script; complete HACS runtime sources and upstream tests at 977980f149e8fc0d4a9f5ccaed3a1455b8c1b904 integrated.
@@ -38,7 +57,7 @@
 - Up to 20 account IDs. Each account uses an upstream SessionManager/LINE client and its own cookies, contacts, sender and QR flow.
 - Inbox and deduplication retain the last 2000 events; older redeliveries may be accepted again. Polls deliver up to 100 every five seconds. Overflow can create gaps, which HA logs.
 - HA bus delivery and cursor updates cannot provide exactly-once delivery across a crash. Downstream automations should deduplicate account plus webhook_event_id.
-- Incoming events are sanitized and do not contain replyToken. No automated reply or official Messaging API sender has been added.
+- Incoming events are sanitized and do not contain replyToken. Optional OpenClaw automatic replies are disabled until configured; outgoing messages still use the existing OA Manager session, not an official Messaging API sender. See docs/OPENCLAW.md for queue retention, review and supported content limits.
 - Aggregate sensors mean at least one account connected; they are not per-account entity sensors. Inspect account cards for individual state.
 - Deleting an account intentionally destroys its local credentials, contacts, webhook secret and retained events. This is not migration from an existing single-account Add-on; take a full backup first.
 - The HACS domain remains line_oa. Do not run the upstream integration and this fork as two copies of the same domain in one HA instance.

@@ -18,3 +18,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .account-actions{display:flex;gap:8px}
 code{font-family:ui-monospace,Consolas,monospace}
 #feedback{min-height:24px}
+.bridge{margin-top:24px}.bridge p{overflow-wrap:anywhere}
+dialog{max-width:760px;width:calc(100% - 64px);max-height:85vh;overflow:auto;border:1px solid GrayText;border-radius:12px;background:Canvas;color:CanvasText}
+dialog::backdrop{background:#0008}dialog form{border:0;padding:0}dialog input,dialog select{box-sizing:border-box;width:100%;margin:4px 0 14px;padding:9px;font:inherit}
+dialog input[type=checkbox]{width:auto}dialog .route{border:1px solid GrayText;border-radius:8px;padding:12px;margin:10px 0}
+#claw-error{color:#d44}.job{border-bottom:1px solid GrayText;padding:12px 0;overflow-wrap:anywhere}.job button{margin:4px;font-size:.9rem}

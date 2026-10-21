@@ -35,7 +35,13 @@ data:
 
 Webhook settings use each OA's Messaging API Channel Secret. The HA session status sensor exposes `webhook_path`. Configure LINE Developers with your external HTTPS HA URL plus that path. Only this webhook endpoint needs public reachability; keep Gateway API and administrative listeners private.
 
-Signature verification uses original bytes and the account's secret. The first valid signed request securely binds that channel's `destination`; later destination changes are rejected. This avoids incorrectly equating LINE OA Manager's internal account ID with the Messaging API bot user ID. Requests are durably queued before 200. The bounded inbox retains the last 2000 events; deduplication covers that retained window, including restarts. HA polls every five seconds and fires `line_oa_message` with `account`, event ID and sanitized fields. Delivery to the HA bus and cursor persistence are not an atomic transaction; a crash can replay an event. Automations should deduplicate by account and webhook event ID if needed. No automatic reply is implemented.
+Signature verification uses original bytes and the account's secret. The first valid signed request securely binds that channel's `destination`; later destination changes are rejected. This avoids incorrectly equating LINE OA Manager's internal account ID with the Messaging API bot user ID. Requests are durably queued before 200. The bounded inbox retains the last 2000 events; deduplication covers that retained window, including restarts. HA polls every five seconds and fires `line_oa_message` with `account`, event ID and sanitized fields (including image message IDs, never reply tokens). Delivery to the HA bus and cursor persistence are not an atomic transaction; a crash can replay an event. Automations should deduplicate by account and webhook event ID if needed.
+
+## OpenClaw on Mac
+
+Optional per-account automatic replies now use a separate durable queue: **LINE → HA Webhook → OpenClaw → OA Multi sender**. Configure the connection in the Add-on Web UI, then bind approved LINE sources to contact aliases. Incoming images use that account's Channel Access Token for download only; outgoing text/images use the existing QR-login OA Manager session, never the official push/reply send APIs. Long replies are split without truncation. Uncertain sends require review instead of blind retry. No HA YAML automation or modification of OpenClaw's LINE plugin is needed.
+
+See [Mac setup and recovery](docs/OPENCLAW.md), including the supplied Mac image adapter and optional automatic startup. This new bridge's actual Mac/HAOS end-to-end behavior remains **pending device validation**.
 
 Use a test HA instance and test recipients. The sender uses LINE's unofficial management interface; a successful HTTP submission is not independent proof of recipient delivery. Restart persistence, backup/restore, long-running stability and LINE Developers Webhook verification remain acceptance tests.
 

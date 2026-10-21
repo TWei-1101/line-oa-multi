@@ -1,3 +1,10 @@
+# 0.3.0-dev.1
+
+- 新增可選的 HA Webhook → Mac OpenClaw → OA Multi 文字／圖片橋接；每個帳號獨立啟用、來源綁定與 Token。
+- SQLite 保存工作、完整回答與分段進度；結果不確定時保留待人工確認，避免盲目重送。
+- Add-on Web UI 提供連線、來源／聯絡人綁定及失敗工作管理，無須另寫 HA automation。
+- 隨附 Mac 圖片轉接程式與啟動說明；Mac／HAOS 實機端到端仍待驗證。
+
 # 0.1.9
 
 - 修正啟動後的狀態同步。
