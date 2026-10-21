@@ -27,6 +27,10 @@ type Dependencies = { sender(account: string): Sender | undefined; hasAlias(acco
   fetch?: typeof fetch; now?: () => number };
 const defaults = (): Config => ({url: '', token: '', agent: 'main', timeout_seconds: 300, accounts: {}});
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const connectFailure = (e: unknown): boolean => {
+  const cause=object(e) && object(e.cause)?e.cause:undefined;
+  return ['ECONNREFUSED','ENOTFOUND','EAI_AGAIN','ENETUNREACH','EHOSTUNREACH','UND_ERR_CONNECT_TIMEOUT'].includes(String(cause?.code));
+};
 
 export class BridgeError extends Error {
   constructor(public readonly code: string, public readonly status = 400) { super(code); }
@@ -303,7 +307,9 @@ export class OpenClawBridge {
           await response.body?.cancel();
           // An explicit refusal before a run can be retried; a server error may
           // follow committed agent tool effects and therefore needs review.
-          if (response.status===429) { job.state='pending'; return fail('OPENCLAW_HTTP_429'); }
+          if (response.status===429 || (response.status===503 && response.headers.get('x-line-oa-retry-safe')==='before-agent')) {
+            job.state='pending';return fail(`OPENCLAW_HTTP_${response.status}`);
+          }
           return fail(`OPENCLAW_HTTP_${response.status}`);
         }
         const outputs=parseAnswer(JSON.parse((await boundedBody(response,MAX_BODY)).toString('utf8')));
@@ -311,6 +317,7 @@ export class OpenClawBridge {
         job.outputs=outputs;job.total=outputs.length;
         job.state='ready';job.error=null;job.attempts=0;this.save(job);
       } catch (e) {
+        if(job.state==='generating' && connectFailure(e))job.state='pending';
         const code=e instanceof BridgeError ? e.code : job.state==='generating'?'OPENCLAW_RESULT_UNCERTAIN':'LINE_CONTENT_UNAVAILABLE';
         job.error=code;
         if (job.state==='pending' && (['LINE_CONTENT_UNAVAILABLE','OPENCLAW_HTTP_429','OPENCLAW_HTTP_503'].includes(code) || /^LINE_CONTENT_HTTP_5/.test(code))) {

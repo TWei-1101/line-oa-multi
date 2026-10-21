@@ -83,8 +83,17 @@ export function createMacAdapter(options:AdapterOptions): http.Server {
       for(const key of ['x-openclaw-agent-id','x-openclaw-session-key']){
         const v=req.headers[key];if(typeof v==='string' && v.length<512)headers[key]=v;
       }
-      const upstream=await fetcher(endpoint,{method:'POST',headers,body:JSON.stringify(body),redirect:'error',
-        signal:AbortSignal.any([controller.signal,AbortSignal.timeout(options.timeoutMs??1800_000)])});
+      let upstream:Response;
+      try{
+        upstream=await fetcher(endpoint,{method:'POST',headers,body:JSON.stringify(body),redirect:'error',
+          signal:AbortSignal.any([controller.signal,AbortSignal.timeout(options.timeoutMs??1800_000)])});
+      }catch(e){
+        const code=(e as {cause?:{code?:string}})?.cause?.code;
+        if(['ECONNREFUSED','ENOTFOUND','EAI_AGAIN','ENETUNREACH','EHOSTUNREACH','UND_ERR_CONNECT_TIMEOUT'].includes(code??'')){
+          res.setHeader('x-line-oa-retry-safe','before-agent');return reply(503,{error:'OPENCLAW_CONNECT_UNAVAILABLE'});
+        }
+        throw e;
+      }
       if(!upstream.ok){await upstream.body?.cancel();return reply(upstream.status,{error:'OPENCLAW_UPSTREAM_REJECTED'});}
       const reader=upstream.body?.getReader();if(!reader)throw new Error('EMPTY_RESPONSE');
       const output:Buffer[]=[];let total=0;

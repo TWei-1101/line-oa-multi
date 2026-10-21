@@ -113,6 +113,24 @@ test('incomplete, unsupported and lost AI responses are never silently submitted
   }finally{await f.close();}
 });
 
+test('offline Mac reconnects safely and later image content is cached while an earlier turn waits',async()=>{
+  let connected=false,images=0,generations=0;
+  const f=await fixture(async(url)=>{
+    if(String(url).startsWith('https://api-data.line.me/')){
+      images++;return new Response(Buffer.from(png.split(',')[1]!,'base64'),{headers:{'Content-Type':'image/png'}});
+    }
+    generations++;
+    if(!connected)throw new TypeError('fetch failed',{cause:Object.assign(new Error('refused'),{code:'ECONNREFUSED'})});
+    return Response.json(answer('online'));
+  });
+  try{
+    f.bridge.enqueue([event(),{...event('event-image-002'),message_type:'image',message_id:'12345'}]);
+    await f.bridge.tick();assert.equal(images,1);assert.equal(f.bridge.status().counts.pending,2);
+    connected=true;f.advance();await f.restart();await f.bridge.tick();await f.bridge.tick();
+    assert.equal(images,1);assert.equal(generations,3);assert.equal(f.sent.length,2);
+  }finally{await f.close();}
+});
+
 test('restart during sending never replays the in-flight part; during generation requires review',async()=>{
   const f=await fixture();
   try{
