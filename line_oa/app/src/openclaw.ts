@@ -121,6 +121,7 @@ export class OpenClawBridge {
   private config: Config = defaults();
   private timer?: ReturnType<typeof setInterval>;
   private task?: Promise<void>;
+  private mediaTask?: Promise<void>;
   private stopping = false;
   private abort = new AbortController();
   private readonly fetcher: typeof fetch;
@@ -261,12 +262,16 @@ export class OpenClawBridge {
     this.timer.unref();
   }
   tick(): Promise<void> {
-    if (this.task) return this.task;
     if (this.stopping || this.fault) return Promise.resolve();
-    this.task=this.process().finally(()=>{this.task=undefined;});
+    // A slow model turn must not prevent caching newly arriving LINE images.
+    if(!this.mediaTask)this.mediaTask=this.prefetch().catch(()=>{this.fault='OPENCLAW_STORAGE_OR_WORKER_ERROR';})
+      .finally(()=>{this.mediaTask=undefined;});
+    if(this.task)return this.task;
+    const media=this.mediaTask;
+    this.task=(async()=>{await media;if(!this.stopping && !this.fault)await this.process();})().finally(()=>{this.task=undefined;});
     return this.task;
   }
-  private async process(): Promise<void> {
+  private async prefetch(): Promise<void> {
     // Cache incoming images even while an earlier turn is waiting on the Mac.
     // LINE content is not a permanent archive, so don't wait for that turn.
     const image=this.jobs().find(j=>j.state==='pending' && j.event.message_type==='image' && !j.input_image &&
@@ -279,6 +284,8 @@ export class OpenClawBridge {
         else{image.state='failed';image.error=code;this.save(image);}
       }
     }
+  }
+  private async process(): Promise<void> {
     const seen=new Set<string>();
     const job=this.jobs().find(j=>{
       if (['submitted','ignored'].includes(j.state)) return false;
@@ -376,7 +383,7 @@ export class OpenClawBridge {
   stop(): Promise<void> {
     if(this.stopped)return this.stopped;
     this.stopping=true;if(this.timer)clearInterval(this.timer);this.abort.abort();
-    this.stopped=(async()=>{await this.task?.catch(()=>undefined);this.db.close();})();
+    this.stopped=(async()=>{await Promise.all([this.task?.catch(()=>undefined),this.mediaTask?.catch(()=>undefined)]);this.db.close();})();
     return this.stopped;
   }
 }

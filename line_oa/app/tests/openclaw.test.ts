@@ -103,6 +103,34 @@ test('explicit preflight busy and rate limits retry without regenerating the ans
   }finally{await f.close();}
 });
 
+test('a held conversation does not block another source and its OpenClaw session is separate',async()=>{
+  const sessions:string[]=[];const f=await fixture(async(_url,init)=>{
+    sessions.push(new Headers(init?.headers).get('x-openclaw-session-key')!);return Response.json(answer('answer'));
+  });
+  let calls=0;f.sender.send=async(who,text)=>{calls++;f.sent.push({who,text});return calls===1?{result:'UNKNOWN',sendId:'uncertain'}:ok();};
+  try{
+    f.bridge.configure({enabled:true,routes:[{source_type:'user',source_id:user,who:'simon'},{source_type:'user',source_id:other,who:'other'}]},'aiassistant');
+    f.bridge.enqueue([event(),event('event-same-002'),{...event('event-other-003'),user_id:other}]);
+    await f.bridge.tick();await f.bridge.tick();
+    assert.equal(f.bridge.status().counts.unknown,1);assert.equal(f.bridge.status().counts.pending,1);
+    assert.equal(f.bridge.status().counts.submitted,1);assert.equal(f.sent[1]?.who,'other');
+    assert.notEqual(sessions[0],sessions[1]);
+  }finally{await f.close();}
+});
+
+test('bridge commit followed by failed inbox save remains deduplicated on LINE redelivery',async()=>{
+  const f=await fixture();
+  try{
+    const hook=new MultiWebhook(f.root,events=>{f.bridge.enqueue(events);throw new Error('SIMULATED_INBOX_WRITE_FAILURE');});
+    await hook.load();await hook.set('aiassistant',true,secret);
+    const body=Buffer.from(JSON.stringify({destination:other,events:[{webhookEventId:'event-000001',type:'message',source:{type:'user',userId:user},message:{type:'text',text:'test'}}]}));
+    const sig=createHmac('sha256',secret).update(body).digest('base64');
+    await assert.rejects(hook.receive(body,sig),/SIMULATED/);assert.equal(f.bridge.status().jobs.length,1);
+    const restored=new MultiWebhook(f.root,events=>f.bridge.enqueue(events));await restored.load();
+    await restored.receive(body,sig);await f.bridge.tick();assert.equal(f.sent.length,1);
+  }finally{await f.close();}
+});
+
 test('incomplete, unsupported and lost AI responses are never silently submitted or automatically rerun',async()=>{
   assert.throws(()=>parseAnswer({...answer('partial'),status:'incomplete'}),/INCOMPLETE/);
   assert.throws(()=>parseAnswer(answer('MEDIA:/Users/test/private.png')),/ADAPTER_REQUIRED/);
@@ -129,6 +157,25 @@ test('offline Mac reconnects safely and later image content is cached while an e
     connected=true;f.advance();await f.restart();await f.bridge.tick();await f.bridge.tick();
     assert.equal(images,1);assert.equal(generations,3);assert.equal(f.sent.length,2);
   }finally{await f.close();}
+});
+
+test('incoming image caching continues while the Mac is still generating an earlier answer',async()=>{
+  let started!:()=>void,downloaded!:()=>void,finish!:()=>void;
+  const startSignal=new Promise<void>(r=>{started=r;}),imageSignal=new Promise<void>(r=>{downloaded=r;});
+  const generation=new Promise<void>(r=>{finish=r;});
+  const f=await fixture(async(url)=>{
+    if(String(url).startsWith('https://api-data.line.me/')){
+      downloaded();return new Response(Buffer.from(png.split(',')[1]!,'base64'),{headers:{'Content-Type':'image/png'}});
+    }
+    started();await generation;return Response.json(answer('done'));
+  });
+  try{
+    f.bridge.enqueue([event()]);const first=f.bridge.tick();await startSignal;
+    f.bridge.enqueue([{...event('event-image-002'),message_type:'image',message_id:'12345'}]);
+    const background=f.bridge.tick();await imageSignal;
+    assert.equal(f.bridge.status().counts.generating,1);finish();await Promise.all([first,background]);
+    await f.bridge.tick();assert.equal(f.bridge.status().counts.submitted,2);
+  }finally{finish();await f.close();}
 });
 
 test('restart during sending never replays the in-flight part; during generation requires review',async()=>{
@@ -176,10 +223,14 @@ test('Mac adapter embeds local image parts, preserves text and rejects paths out
     const outputs=parseAnswer(result);assert.equal(outputs[1]?.type,'image');
     assert.equal(outputs.filter(p=>p.type==='text').map(p=>p.text).join(''),'第一段\n\n第二段');
     assert.equal(parseAnswer(await inlineMedia(answer('![圖](test.png)'),root))[0]?.type,'image');
+    const manifest=answer(JSON.stringify({line_oa_reply:[{type:'text',text:'完整說明'},{type:'image',path:join(root,'test.png')},{type:'text',text:'結尾'}]}));
+    const manifestOutput=parseAnswer(await inlineMedia(manifest,root));
+    assert.deepEqual(manifestOutput.map(x=>x.type),['text','image','text']);
+    assert.equal(manifestOutput[2]?.type==='text'?manifestOutput[2].text:'','結尾');
     await assert.rejects(inlineMedia(answer('MEDIA:../private.png'),root),/OUTSIDE_ALLOWED_ROOT/);
     const token='t'.repeat(40);let upstream=0;
     const server=createMacAdapter({gatewayUrl:'http://127.0.0.1:18789',gatewayToken:'gateway-secret',bridgeToken:token,mediaRoot:root,
-      fetcher:async(_url,init)=>{upstream++;assert.equal(new Headers(init?.headers).get('authorization'),'Bearer gateway-secret');return Response.json(answer('MEDIA:test.png'));}});
+      fetcher:async(_url,init)=>{upstream++;assert.equal(new Headers(init?.headers).get('authorization'),'Bearer gateway-secret');assert.match(JSON.parse(String(init?.body)).instructions,/line_oa_reply/);return Response.json(answer('MEDIA:test.png'));}});
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
     try{
       const url=`http://127.0.0.1:${(server.address() as {port:number}).port}/v1/responses`;

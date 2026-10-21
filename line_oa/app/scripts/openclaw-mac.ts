@@ -45,6 +45,19 @@ export async function inlineMedia(response: Record<string,unknown>, root: string
     for(const part of item.content as Part[]){
       if(part.type!=='output_text' || typeof part.text!=='string'){parts.push(part);continue;}
       const text=part.text;
+      // A JSON manifest survives OpenClaw's text-only HTTP projection even when
+      // its internal channel handling consumes MEDIA: directives separately.
+      if(text.includes('"line_oa_reply"')){
+        const raw=text.trim().replace(/^```(?:json)?\s*\n/,'').replace(/\n```$/,'');
+        const manifest=JSON.parse(raw) as {line_oa_reply?:Part[]};
+        if(!Array.isArray(manifest.line_oa_reply) || !manifest.line_oa_reply.length || manifest.line_oa_reply.length>200)throw new Error('INVALID_REPLY_MANIFEST');
+        for(const entry of manifest.line_oa_reply){
+          if(entry.type==='text' && typeof entry.text==='string')parts.push({type:'output_text',text:entry.text});
+          else if(entry.type==='image' && typeof entry.path==='string')parts.push(await inlineImage(entry.path,root));
+          else throw new Error('UNSUPPORTED_REPLY_MANIFEST_PART');
+        }
+        continue;
+      }
       const pattern=/(?:^|(?<=\n))[ \t]*MEDIA:[ \t]*([^\r\n]+)|!\[[^\]]*\]\(([^\r\n)]+)\)/g;
       let cursor=0;
       for(const match of text.matchAll(pattern)){
@@ -79,6 +92,11 @@ export function createMacAdapter(options:AdapterOptions): http.Server {
       for await(const chunk of req){size+=chunk.length;if(size>20*1024*1024)return reply(413,{error:'REQUEST_TOO_LARGE'});chunks.push(Buffer.from(chunk));}
       const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if(!body || typeof body!=='object' || Array.isArray(body) || body.stream===true)return reply(400,{error:'NON_STREAMING_JSON_REQUIRED'});
+      body.instructions=[typeof body.instructions==='string'?body.instructions:'',
+        'Your final answer is relayed to LINE by an external bridge. Do not use LINE/channel message tools to send it.',
+        'Return the entire final answer as a JSON object, without Markdown fences: {"line_oa_reply":[{"type":"text","text":"your complete answer"}]}.',
+        `If you create images, save JPEG/PNG files under ${options.mediaRoot} and include ordered {"type":"image","path":"absolute file path"} parts in line_oa_reply.`,
+        'Include all answer text and image paths; do not replace your answer with a summary or use MEDIA: directives.'].filter(Boolean).join('\n');
       const headers:Record<string,string>={'Content-Type':'application/json',Authorization:`Bearer ${options.gatewayToken}`};
       for(const key of ['x-openclaw-agent-id','x-openclaw-session-key']){
         const v=req.headers[key];if(typeof v==='string' && v.length<512)headers[key]=v;

@@ -5,11 +5,13 @@
 - Add-on `0.3.0-dev.1` adds optional per-account OpenClaw Responses bridging,
   incoming image download, ordered text/image output, durable SQLite jobs,
   retained incomplete/uncertain results, and Ingress/CSRF-protected configuration.
-- Node 24.19.0 / strict TypeScript build passed locally. All 10 new bridge/Mac
-  adapter tests and both multi-gateway tests passed (12 targeted tests), covering
+- Node 24.19.0 / strict TypeScript build passed locally. All 14 new bridge/Mac
+  adapter tests and both multi-gateway tests passed (16 targeted tests), covering
   signed admission, duplicate/restart suppression, own-account image credentials,
   exact long Unicode text reconstruction, image order, preflight retry, uncertain
-  sends, queue backpressure, private media-root enforcement and secret redaction.
+  sends, queue backpressure, private media-root enforcement and secret redaction;
+  also concurrent image caching during slow AI turns, offline reconnect, held-lane
+  isolation and redelivery after a bridge commit/inbox-write failure.
 - Native Windows full suite: 85 passed / 5 failed. These failures concern existing
   POSIX mode assertions (Windows doesn't represent 0600/0700) and the existing
   API-key revocation directory fsync. Linux CI is the deployment gate; the new

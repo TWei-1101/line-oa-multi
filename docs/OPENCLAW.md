@@ -72,8 +72,16 @@ processing. Pending work stays on HA. For background operation, save these
 environment values in a private file and use the launchd example below.
 
 Output images must be written underneath `LINE_OA_MEDIA_ROOT`, for example
-`~/.openclaw/workspace/line-output/answer.png`. Configure the dedicated agent to
-write there and return `MEDIA:/absolute/path/to/answer.png` on its own line.
+`~/.openclaw/workspace/line-output/answer.png`. The adapter requests a complete
+ordered JSON answer manifest, so local images survive OpenClaw's text-only HTTP
+response projection even if it consumes its own `MEDIA:` directives:
+
+```json
+{"line_oa_reply":[{"type":"text","text":"完整回答"},{"type":"image","path":"/Users/YOUR_MAC_USER/.openclaw/workspace/line-output/answer.png"}]}
+```
+
+The manifest is converted to ordinary LINE text/images, not shown to recipients.
+Plain text and explicit local `MEDIA:`/Markdown references are also accepted.
 Symlinks or `..` references escaping the root are rejected. The adapter doesn't
 fetch arbitrary image URLs or expose a file server.
 
