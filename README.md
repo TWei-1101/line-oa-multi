@@ -41,7 +41,7 @@ Signature verification uses original bytes and the account's secret. The first v
 
 Optional per-account automatic replies now use a separate durable queue: **LINE → HA Webhook → OpenClaw → OA Multi sender**. Configure the connection in the Add-on Web UI, then bind approved LINE sources to contact aliases. Incoming images use that account's Channel Access Token for download only; outgoing text/images use the existing QR-login OA Manager session, never the official push/reply send APIs. Long replies are split without truncation. Uncertain sends require review instead of blind retry. No HA YAML automation or modification of OpenClaw's LINE plugin is needed.
 
-See [Mac setup and recovery](docs/OPENCLAW.md), including the supplied Mac image adapter and optional automatic startup. This new bridge's actual Mac/HAOS end-to-end behavior remains **pending device validation**.
+See [繁體中文安裝步驟](docs/OPENCLAW-zh-TW.md) or [Mac setup and recovery](docs/OPENCLAW.md), including the supplied Mac image adapter and optional automatic startup. This new bridge's actual Mac/HAOS end-to-end behavior remains **pending device validation**.
 
 Use a test HA instance and test recipients. The sender uses LINE's unofficial management interface; a successful HTTP submission is not independent proof of recipient delivery. Restart persistence, backup/restore, long-running stability and LINE Developers Webhook verification remain acceptance tests.
 

@@ -16,7 +16,19 @@
   POSIX mode assertions (Windows doesn't represent 0600/0700) and the existing
   API-key revocation directory fsync. Linux CI is the deployment gate; the new
   bridge's local pass does not override failures on the target platform.
-- Exact-commit Linux amd64/aarch64 builds and container smoke checks: pending.
+- Runtime commit `df25afc60635dbb1c94de72d577e40ee5ebbf976` passed
+  [GitHub Actions 39569850782](https://github.com/TWei-1101/line-oa-multi/actions/runs/39569850782):
+  native amd64 and aarch64 each passed all 94 Node tests, Docker builds and
+  container smoke checks (health, private ports, graceful stop, restart, stable
+  identity). Both HACS matrices passed 244 tests plus Ruff/compilation; the newer
+  matrix also passed mypy for all 15 integration modules.
+- The first bridge CI run failed only because an existing health-contract test
+  hard-coded the previous release version. The test now compares runtime health
+  to package metadata; the subsequent full runs passed.
+- Backup/version checks pass. Settings/read-only status and job-review routes
+  are covered by HTTP authentication/CSRF checks. JavaScript syntax checks pass;
+  interactive visual browser QA could not run because no in-app browser backend
+  was available. The UI remains part of device acceptance.
 - Real Mac/HAOS/LINE end-to-end, installed OpenClaw API compatibility, Mac image
   tools/paths, launchd startup, sleep/offline recovery and recipient delivery:
   **pending device validation**. No live LINE message was sent in these tests.

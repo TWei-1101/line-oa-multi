@@ -57,13 +57,13 @@ export OPENCLAW_GATEWAY_TOKEN
 export LINE_OA_BRIDGE_TOKEN="$(openssl rand -hex 32)"
 export LINE_OA_BRIDGE_BIND=192.168.1.50
 export LINE_OA_MEDIA_ROOT="$HOME/.openclaw/workspace"
+printf '%s' "$LINE_OA_BRIDGE_TOKEN" | pbcopy
 node openclaw-mac.ts
 ```
 
 Replace `192.168.1.50` with this Mac's actual private LAN IP. The adapter listens
-on port 18790. Copy `LINE_OA_BRIDGE_TOKEN` privately into the Add-on's connection
-settings (before starting the foreground process, `printf '%s' "$LINE_OA_BRIDGE_TOKEN" | pbcopy`
-copies it without printing it). The adapter has a separate token and keeps the
+on port 18790. The commands copy `LINE_OA_BRIDGE_TOKEN` privately to the Mac
+clipboard; paste it into the Add-on's connection settings. The adapter has a separate token and keeps the
 OpenClaw Gateway token on the Mac. No port forwarding to the Mac is required.
 Use this only on a trusted LAN; use a private VPN or HTTPS for untrusted networks.
 
