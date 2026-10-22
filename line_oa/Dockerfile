@@ -10,7 +10,7 @@ COPY app/web ./web
 RUN npm test
 
 FROM node:24-bookworm-slim AS runtime
-ARG BUILD_VERSION=0.3.0-dev.1
+ARG BUILD_VERSION=0.3.0-dev.2
 ARG TARGETARCH
 ARG BUILD_ARCH=amd64
 # Docker uses arm64; Home Assistant uses aarch64. Reject a mislabeled image.
@@ -25,10 +25,11 @@ ENV NODE_ENV=production DATA_DIR=/data
 WORKDIR /app
 # No production dependencies: Gateway uses only Node.js built-ins.
 COPY --from=build /build/dist/src ./dist/src
+COPY --from=build /build/dist/scripts ./dist/scripts
 COPY app/web ./web
 COPY app/package.json ./package.json
 COPY LICENSE ./LICENSE
 # Runtime has one Node process; npm/compiler are not needed.
 RUN rm -rf /usr/local/lib/node_modules /opt/yarn-* /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 EXPOSE 8099 8787
-CMD ["node", "dist/src/multi-server.js"]
+CMD ["node", "dist/scripts/controlled-start.js"]
