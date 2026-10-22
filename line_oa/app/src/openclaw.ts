@@ -4,10 +4,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import { chmod } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
-import type { ReceivedEvent } from './webhook.js';
+import { familyMentionAdmitted, type ReceivedEvent } from './webhook.js';
 import type { SendResult } from './types.js';
 import { ensurePrivateDir } from './storage.js';
+import { bridgeDatabasePath } from './data-paths.js';
 
 const NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const WHO = /^[a-z0-9_-]{1,32}$/;
@@ -15,16 +15,20 @@ const MAX_IMAGE = 10 * 1024 * 1024;
 const MAX_BODY = 32 * 1024 * 1024;
 const MAX_PENDING = 1000;
 type Route = { source_type: 'user' | 'group' | 'room'; source_id: string; who: string };
-type AccountConfig = { enabled: boolean; channel_access_token: string; routes: Route[] };
+type EndpointOverride = { mode:'override'; url:string; token:string; agent:string; timeout_seconds:number; protocol:'legacy-responses'|'family-text-v1' };
+type AccountConfig = { enabled: boolean; channel_access_token: string; routes: Route[]; endpoint?: EndpointOverride; admission?: 'legacy'|'self-mention-group-text'; expected_destination?: string };
 type Config = { url: string; token: string; agent: string; timeout_seconds: number; accounts: Record<string, AccountConfig> };
 type Output = { type: 'text'; text: string } | { type: 'image'; data: string; mime: 'image/jpeg' | 'image/png' };
 type Job = { id: string; account: string; lane: string; who: string; event: ReceivedEvent; input_image?: string;
   state: 'pending' | 'generating' | 'ready' | 'sending' | 'submitted' | 'unknown' | 'failed' | 'ignored';
-  outputs: Output[]; total?: number; next: number; attempts: number; due: number; error: string | null; created: number };
-type Sender = { send(who: string, text: string): Promise<SendResult>;
-  sendImage(who: string, image: Buffer, mime: 'image/jpeg' | 'image/png'): Promise<SendResult> };
-type Dependencies = { sender(account: string): Sender | undefined; hasAlias(account: string, who: string): boolean;
-  fetch?: typeof fetch; now?: () => number };
+  outputs: Output[]; total?: number; next: number; attempts: number; due: number; error: string | null; created: number;
+  /** Endpoint as accepted time. The token is deliberately absent from the job row:
+   * it lives only in credential_revisions, addressed by credential_revision. */
+  snapshot?: Omit<EndpointSnapshot,'token'> & {version:1; admission:'legacy'|'self-mention-group-text';session_policy:'legacy-lane-v1'|'family-group-v1';session_key:string;expected_destination?:string}; credential_revision?: number; media_credential_revision?:number; recipient?: string };
+type Sender = { send(who: string, text: string, expectedTarget?: string): Promise<SendResult>;
+  sendImage(who: string, image: Buffer, mime: 'image/jpeg' | 'image/png', expectedTarget?: string): Promise<SendResult> };
+type Dependencies = { sender(account: string): Sender | undefined; hasAlias(account: string, who: string): boolean; resolveAlias?(account: string, who: string): string | undefined;
+  boundDestination?(account:string):string|undefined; fetch?: typeof fetch; now?: () => number };
 const defaults = (): Config => ({url: '', token: '', agent: 'main', timeout_seconds: 300, accounts: {}});
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const connectFailure = (e: unknown): boolean => {
@@ -46,6 +50,31 @@ function checkUrl(value: unknown): string {
       u.pathname !== '/v1/responses') return fail('INVALID_OPENCLAW_URL');
   return u.href;
 }
+export type EndpointSnapshot = {url:string;token:string;agent:string;timeout_seconds:number;protocol:'legacy-responses'|'family-text-v1'};
+export function effectiveEndpoint(global: {url:string;token:string;agent:string;timeout_seconds:number}, account: {endpoint?: EndpointOverride;admission?:string}): EndpointSnapshot {
+  if (account.endpoint) { const {mode, ...snapshot}=account.endpoint; return snapshot; }
+  if (account.admission === 'self-mention-group-text') fail('FAMILY_ENDPOINT_SNAPSHOT_REQUIRED');
+  if (!global.url || !global.token) fail('OPENCLAW_CONFIGURATION_REQUIRED');
+  return {...global,protocol:'legacy-responses'};
+}
+
+/** An account PATCH may omit the token to keep the stored one. An explicit single-key
+ * `inherit` clears the override; the family account cannot fall back to the shared
+ * endpoint, so validateConfig rejects that shape while family is enabled. */
+function mergedEndpoint(old: EndpointOverride | undefined, patch: unknown): EndpointOverride | undefined {
+  if (patch === undefined) return old;
+  if (!object(patch)) return patch as EndpointOverride;
+  if (patch.mode === 'inherit' && Object.keys(patch).length === 1) return undefined;
+  if (old && patch.mode === 'override' && patch.token === undefined && Object.keys(patch).length === 5)
+    return { ...old, ...(patch as unknown as EndpointOverride) };
+  return patch as unknown as EndpointOverride;
+}
+/** Allowed family groups are exactly the account's own group routes, so there is no
+ * second whitelist that could drift away from what is actually reachable. */
+function groupWhitelist(cfg: AccountConfig): ReadonlySet<string> {
+  return new Set(cfg.routes.filter(r => r.source_type === 'group').map(r => r.source_id));
+}
+
 export function sourceKey(e: ReceivedEvent): string | undefined {
   const id = e.source_type === 'group' ? e.group_id : e.source_type === 'room' ? e.room_id :
     e.source_type === 'user' ? e.user_id : undefined;
@@ -72,6 +101,11 @@ export function imageData(data: string): {data: string; mime: 'image/jpeg' | 'im
         !(buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255))) return fail('INVALID_IMAGE_DATA');
   return {data, mime};
 }
+export function parseFamilyAnswer(value: unknown): Output[] {
+  if (!object(value) || Object.keys(value).length !== 1 || typeof value.text !== 'string' || !value.text.trim() || value.text.length > 5000 || value.text.includes('\0')) return fail('FAMILY_RESPONSE_INVALID');
+  return [{type:'text',text:value.text}];
+}
+
 export function parseAnswer(value: unknown): Output[] {
   if (!object(value) || value.status !== 'completed' || !Array.isArray(value.output)) return fail('OPENCLAW_RESPONSE_INCOMPLETE');
   const result: Output[] = [];
@@ -116,13 +150,38 @@ async function boundedBody(response: Response, limit: number): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+function snapshotSessionKey(account:string,lane:string,group?:string):string {
+  return account==='family' ? 'line-family:v1:family:'+createHash('sha256').update(group??'').digest('hex') : 'line-oa-multi:'+account+':'+lane;
+}
+export function storedSnapshotValid(value:unknown):boolean {
+    if(!object(value)||!object(value.event))return false;
+    const job=value as unknown as Job;
+    const x=job.snapshot;
+    if(!Number.isSafeInteger(job.credential_revision)||Number(job.credential_revision)<=0)return false;
+    if(job.event.message_type==='image'&&(!Number.isSafeInteger(job.media_credential_revision)||Number(job.media_credential_revision)<=0))return false;
+    if(!Array.isArray(job.outputs)||!Number.isSafeInteger(job.next)||job.next<0||job.next>job.outputs.length)return false;
+    if(!object(x)||x.version!==1||typeof x.agent!=='string'||!NAME.test(x.agent)||!Number.isInteger(x.timeout_seconds)||x.timeout_seconds<30||x.timeout_seconds>1800)return false;
+    const family=job.account==='family';
+    const keys=['version','url','agent','timeout_seconds','protocol','admission','session_policy','session_key',...(family?['expected_destination']:[])];
+    if(Object.keys(x).length!==keys.length||!keys.every(k=>Object.hasOwn(x,k)))return false;
+    try { checkUrl(x.url); } catch { return false; }
+    if(typeof job.account!=='string'||typeof job.who!=='string'||!NAME.test(job.account)||!WHO.test(job.who)||sourceKey(job.event)!==job.lane||job.event.account!==job.account||typeof job.recipient!=='string'||!job.recipient)return false;
+    if(x.session_key!==snapshotSessionKey(job.account,job.lane,job.event.group_id))return false;
+    if(family) {
+      if(x.protocol!=='family-text-v1'||x.agent!=='family-line'||x.admission!=='self-mention-group-text'||x.session_policy!=='family-group-v1'||!/^C[0-9a-f]{32}$/i.test(job.event.group_id??'')||job.event.destination!==x.expected_destination)return false;
+      if(!familyMentionAdmitted(job.event,{account:'family',groups:new Set([job.event.group_id!]),destination:x.expected_destination??''}))return false;
+      if(job.outputs.some(p=>!object(p)||p.type!=='text'||typeof p.text!=='string'||!p.text.trim()||p.text.length>5000||p.text.includes('\0')))return false;
+    } else if(x.protocol!=='legacy-responses'||x.admission!=='legacy'||x.session_policy!=='legacy-lane-v1')return false;
+    return true;
+  }
+
 export class OpenClawBridge {
   private db!: DatabaseSync;
   private config: Config = defaults();
   private timer?: ReturnType<typeof setInterval>;
   private task?: Promise<void>;
   private mediaTask?: Promise<void>;
-  private stopping = false;
+  private stopping = false; private paused = false;
   private abort = new AbortController();
   private readonly fetcher: typeof fetch;
   private readonly now: () => number;
@@ -133,28 +192,43 @@ export class OpenClawBridge {
   }
   async load(): Promise<void> {
     await ensurePrivateDir(this.root);
-    const path = join(this.root, 'openclaw.sqlite');
+    const path = bridgeDatabasePath(this.root);
     this.db = new DatabaseSync(path);
     await chmod(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, account TEXT NOT NULL, lane TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS job_state ON jobs(state);`);
+      CREATE INDEX IF NOT EXISTS job_state ON jobs(state);
+      CREATE TABLE IF NOT EXISTS credential_revisions (id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT NOT NULL, created INTEGER NOT NULL);`);
     const saved = this.db.prepare('SELECT body FROM config WHERE id=1').get() as {body: string} | undefined;
     if (saved) this.config = this.validateConfig(JSON.parse(saved.body));
     for (const job of this.jobs()) {
       if (job.state === 'sending') { job.state = 'unknown'; job.error = 'RESTART_DURING_SEND'; this.save(job); }
       if (job.state === 'generating') { job.state = 'failed'; job.error = 'OPENCLAW_RESULT_UNCERTAIN'; this.save(job); }
+      if (!['submitted','ignored'].includes(job.state) && !this.snapshotValid(job)) { job.state='unknown';job.error='SNAPSHOT_INVALID_REVIEW_REQUIRED';this.save(job); }
     }
   }
+  private validateOverride(value: unknown): EndpointOverride | undefined {
+    if (value === undefined) return undefined;
+    if (object(value) && value.mode === 'inherit' && Object.keys(value).length === 1) return undefined;
+    if (!object(value) || value.mode !== 'override' || Object.keys(value).length !== 6 || typeof value.token !== 'string' || !value.token || !cleanToken(value.token) || typeof value.agent!=='string' || !NAME.test(value.agent) || !Number.isInteger(value.timeout_seconds) || Number(value.timeout_seconds)<30 || Number(value.timeout_seconds)>1800 || !['legacy-responses','family-text-v1'].includes(String(value.protocol))) fail('INVALID_OPENCLAW_OVERRIDE');
+    const x=value as {url:unknown;token:string;agent:string;timeout_seconds:number;protocol:'legacy-responses'|'family-text-v1'}; return {mode:'override',url:checkUrl(x.url),token:x.token,agent:x.agent,timeout_seconds:x.timeout_seconds,protocol:x.protocol};
+  }
   private validateConfig(v: unknown): Config {
-    if (!object(v) || typeof v.url !== 'string' || !cleanToken(v.token) || !NAME.test(String(v.agent)) ||
+    if (!object(v) || typeof v.url !== 'string' || !cleanToken(v.token) || typeof v.agent!=='string' || !NAME.test(v.agent) ||
         !Number.isInteger(v.timeout_seconds) || Number(v.timeout_seconds) < 30 || Number(v.timeout_seconds) > 1800 ||
         !object(v.accounts) || Object.keys(v.accounts).length > 20) return fail('INVALID_OPENCLAW_SETTINGS');
     if (v.url) checkUrl(v.url);
     for (const [id, cfg] of Object.entries(v.accounts)) {
       if (!NAME.test(id) || !object(cfg) || typeof cfg.enabled !== 'boolean' || !cleanToken(cfg.channel_access_token) ||
           !Array.isArray(cfg.routes) || cfg.routes.length > 100) return fail('INVALID_OPENCLAW_SETTINGS');
+      const endpoint=this.validateOverride(cfg.endpoint);
+      const admission=cfg.admission === undefined ? 'legacy' : cfg.admission;
+      if (!['legacy','self-mention-group-text'].includes(admission as string)) return fail('INVALID_OPENCLAW_ADMISSION');
+      if (cfg.expected_destination!==undefined && (typeof cfg.expected_destination!=='string'||!/^U[0-9a-f]{32}$/i.test(cfg.expected_destination)) && cfg.expected_destination!=='') fail('FAMILY_DESTINATION_REQUIRED');
+      if (id==='family' && cfg.enabled && !/^U[0-9a-f]{32}$/i.test(String(cfg.expected_destination??''))) fail('FAMILY_DESTINATION_REQUIRED');
+      if(id==='family'&&cfg.enabled&&this.deps.boundDestination?.(id)!==cfg.expected_destination)fail('FAMILY_SIGNED_BINDING_REQUIRED',409);
+      if (id==='family' && cfg.enabled && (!endpoint || endpoint.agent!=='family-line' || endpoint.protocol!=='family-text-v1' || admission!=='self-mention-group-text')) return fail('FAMILY_CONFIGURATION_REQUIRED');
       const seen = new Set<string>();
       for (const route of cfg.routes) {
         if (!object(route) || !['user','group','room'].includes(String(route.source_type)) || typeof route.source_id !== 'string' ||
@@ -164,18 +238,33 @@ export class OpenClawBridge {
         if (!route.source_id.startsWith(prefix)) return fail('INVALID_OPENCLAW_ROUTE');
         seen.add(`${route.source_type}:${route.source_id}`);
       }
-      if (cfg.enabled && (!v.url || !v.token || !cfg.routes.length)) return fail('OPENCLAW_CONFIGURATION_REQUIRED');
+      if(id==='family'&&cfg.enabled&&!cfg.routes.some(r=>object(r)&&r.source_type==='group'))fail('FAMILY_GROUP_ROUTE_REQUIRED');
+      if (cfg.enabled && ((!endpoint && (!v.url || !v.token)) || !cfg.routes.length)) return fail('OPENCLAW_CONFIGURATION_REQUIRED');
     }
-    return structuredClone(v) as Config;
+    const result=structuredClone(v) as Config; for (const [id,cfg] of Object.entries(result.accounts)) { cfg.endpoint=this.validateOverride((v.accounts as Record<string,unknown>)[id] && (v.accounts as Record<string,Record<string,unknown>>)[id]!.endpoint); cfg.admission=cfg.admission ?? 'legacy'; } return result;
   }
   configure(patch: Record<string, unknown>, account?: string): void {
-    if (this.task) return fail('OPENCLAW_BUSY',409);
+    // In-flight work owns immutable revisions; intake disable and new-job settings remain available.
     const next = structuredClone(this.config);
+    // A scoped safety action changes only intake state. Previously validated
+    // routes/bindings may have drifted; they must not veto emergency disable.
+    // Any additional field, enablement or identity change still takes the strict path.
+    if(account && Object.keys(patch).length===1 && Object.hasOwn(patch,'enabled') && patch.enabled===false) {
+      if(!NAME.test(account))return fail('INVALID_OPENCLAW_SETTINGS');
+      if(!Object.hasOwn(next.accounts,account))next.accounts[account]={enabled:false,channel_access_token:'',routes:[]};
+      next.accounts[account]!.enabled=false;
+      this.db.prepare('INSERT OR REPLACE INTO config(id,body) VALUES(1,?)').run(JSON.stringify(next));
+      this.config=next;
+      return;
+    }
     if (account) {
       const old = Object.hasOwn(next.accounts,account) ? next.accounts[account]! : {enabled:false, channel_access_token:'', routes:[]};
-      next.accounts[account] = {enabled: patch.enabled as boolean,
+      next.accounts[account] = {enabled: patch.enabled === undefined ? old.enabled : patch.enabled as boolean,
         channel_access_token: patch.channel_access_token === undefined ? old.channel_access_token : patch.channel_access_token as string,
-        routes: patch.routes === undefined ? old.routes : patch.routes as Route[]};
+        routes: patch.routes === undefined ? old.routes : patch.routes as Route[],
+        endpoint: mergedEndpoint(old.endpoint, patch.endpoint),
+        admission: patch.admission === undefined ? old.admission : patch.admission as 'legacy'|'self-mention-group-text',
+        expected_destination:patch.expected_destination===undefined?old.expected_destination:patch.expected_destination as string};
     } else {
       for (const key of ['url','token','agent','timeout_seconds'] as const) {
         if (patch[key] !== undefined) (next as unknown as Record<string, unknown>)[key] = patch[key];
@@ -191,16 +280,16 @@ export class OpenClawBridge {
   status(account?: string) {
     const jobs = this.jobs().filter(j=>!account || j.account===account);
     const {token, accounts, ...base} = this.config;
-    return { ...base, token_configured:!!token, fault:this.fault,
+    return { ...base, token_configured:!!token, fault:this.fault, paused:this.paused,
       accounts: Object.fromEntries(Object.entries(accounts).filter(([id])=>!account || id===account).map(([id,cfg])=>
-        [id,{enabled:cfg.enabled, channel_access_token_configured:!!cfg.channel_access_token, routes:cfg.routes}])),
+        [id,{enabled:cfg.enabled, channel_access_token_configured:!!cfg.channel_access_token, routes:cfg.routes, admission:cfg.admission, expected_destination:cfg.expected_destination, endpoint:cfg.endpoint ? {mode:'override',url:cfg.endpoint.url,agent:cfg.endpoint.agent,timeout_seconds:cfg.endpoint.timeout_seconds,protocol:cfg.endpoint.protocol,token_configured:true} : {mode:'inherit'}}])),
       counts:Object.fromEntries(['pending','generating','ready','sending','submitted','unknown','failed','ignored'].map(s=>[s,jobs.filter(j=>j.state===s).length])),
       jobs: jobs.slice(-100).reverse().map(j=>({id:j.id,account:j.account,source:j.lane,who:j.who,state:j.state,
         error:j.error,next_part:j.next,total_parts:j.total??j.outputs.length,attempts:j.attempts,created:j.created})),
       recent_sources:this.db.prepare('SELECT account,lane FROM jobs GROUP BY account,lane ORDER BY rowid DESC LIMIT 100').all() };
   }
-  hasOutstanding(account: string): boolean {
-    return this.jobs().some(j=>j.account===account && !['submitted','ignored'].includes(j.state));
+  hasOutstanding(account: string, who?:string): boolean {
+    return this.jobs().some(j=>j.account===account && (who===undefined||j.who===who) && !['submitted','ignored'].includes(j.state));
   }
   removeAccount(account: string): void {
     if (this.task || this.hasOutstanding(account)) return fail('OPENCLAW_JOBS_PENDING',409);
@@ -219,13 +308,23 @@ export class OpenClawBridge {
       for (const event of events) {
         const cfg=this.config.accounts[event.account], lane=sourceKey(event);
         if (!cfg?.enabled || !lane || event.type!=='message' || !['text','image'].includes(event.message_type??'')) continue;
+        // Family answers only when the bot itself is @-mentioned in an allowed group;
+        // every other account keeps the legacy all-messages policy.
+        if (event.account==='family' && (!cfg.expected_destination || event.destination!==cfg.expected_destination || this.deps.boundDestination?.(event.account)!==cfg.expected_destination)) continue;
+        if (cfg.admission==='self-mention-group-text' && !familyMentionAdmitted(event,{account:event.account,groups:groupWhitelist(cfg),destination:cfg.expected_destination??''})) continue;
         const route=cfg.routes.find(r=>`${r.source_type}:${r.source_id}`===lane);
         if (!route) continue;
         const id=createHash('sha256').update(`${event.account}\0${event.webhook_event_id}`).digest('hex');
         if (this.db.prepare('SELECT id FROM jobs WHERE id=?').get(id)) continue;
         if (++pending>MAX_PENDING) return fail('OPENCLAW_QUEUE_FULL',503);
+        const endpoint=effectiveEndpoint(this.config,cfg);
+        const revision=this.db.prepare('INSERT INTO credential_revisions(value,created) VALUES(?,?)').run(endpoint.token,this.now());
         this.checkCapacity(Buffer.byteLength(JSON.stringify(event))+1024);
-        this.save({id,account:event.account,lane,who:route.who,event,state:'pending',outputs:[],next:0,attempts:0,due:0,error:null,created:this.now()});
+        const recipient=this.deps.resolveAlias?.(event.account,route.who);
+        const family=event.account==='family';
+        const snapshot:NonNullable<Job['snapshot']>={version:1,url:endpoint.url,agent:endpoint.agent,timeout_seconds:endpoint.timeout_seconds,protocol:endpoint.protocol,admission:cfg.admission??'legacy',session_policy:family?'family-group-v1':'legacy-lane-v1',session_key:this.sessionKey(event.account,lane,event.group_id),...(family?{expected_destination:cfg.expected_destination}:{})};
+        const mediaRevision=event.message_type==='image'&&cfg.channel_access_token ? Number(this.db.prepare('INSERT INTO credential_revisions(value,created) VALUES(?,?)').run(cfg.channel_access_token,this.now()).lastInsertRowid):undefined;
+        this.save({id,account:event.account,lane,who:route.who,...(recipient ? {recipient} : {}),event,snapshot,credential_revision:Number(revision.lastInsertRowid),...(mediaRevision?{media_credential_revision:mediaRevision}:{}),state:'pending',outputs:[],next:0,attempts:0,due:0,error:null,created:this.now()});
       }
       // Never prune pending/failed/uncertain work. Completion retention is bounded.
       const complete=this.jobs().filter(j=>['submitted','ignored'].includes(j.state));
@@ -257,12 +356,12 @@ export class OpenClawBridge {
       .run(job.id,job.account,job.lane,job.state,JSON.stringify(job));
   }
   start(): void {
-    if (this.timer) return;
+    if (this.timer || this.paused || this.stopping) return;
     this.timer=setInterval(()=>{void this.tick().catch(()=>{this.fault='OPENCLAW_STORAGE_OR_WORKER_ERROR';});},1000);
     this.timer.unref();
   }
   tick(): Promise<void> {
-    if (this.stopping || this.fault) return Promise.resolve();
+    if (this.stopping || this.paused || this.fault) return Promise.resolve();
     // A slow model turn must not prevent caching newly arriving LINE images.
     if(!this.mediaTask)this.mediaTask=this.prefetch().catch(()=>{this.fault='OPENCLAW_STORAGE_OR_WORKER_ERROR';})
       .finally(()=>{this.mediaTask=undefined;});
@@ -271,13 +370,23 @@ export class OpenClawBridge {
     this.task=(async()=>{await media;if(!this.stopping && !this.fault)await this.process();})().finally(()=>{this.task=undefined;});
     return this.task;
   }
+  private sessionKey(account:string,lane:string,group?:string):string {
+    return snapshotSessionKey(account,lane,group);
+  }
+  private credential(revision:unknown):string|undefined {
+    if(!Number.isSafeInteger(revision)||Number(revision)<=0)return undefined;
+    const value=(this.db.prepare('SELECT value FROM credential_revisions WHERE id=?').get(revision as number) as {value?:unknown}|undefined)?.value;
+    return cleanToken(value)&&value ? value : undefined;
+  }
+  private snapshotValid(job:Job):boolean { return storedSnapshotValid(job); }
   private async prefetch(): Promise<void> {
     // Cache incoming images even while an earlier turn is waiting on the Mac.
     // LINE content is not a permanent archive, so don't wait for that turn.
     const image=this.jobs().find(j=>j.state==='pending' && j.event.message_type==='image' && !j.input_image &&
       this.config.accounts[j.account]?.enabled && j.due<=this.now());
     if(image){
-      try{await this.downloadImage(image,this.config.accounts[image.account]!.channel_access_token);}
+      if(!this.snapshotValid(image)){image.state='unknown';image.error='SNAPSHOT_INVALID_REVIEW_REQUIRED';this.save(image);return;}
+      try{const token=this.credential(image.media_credential_revision);if(!this.credential(image.credential_revision)||!token){image.state='unknown';image.error='CREDENTIAL_REVISION_MISSING';this.save(image);return;}await this.downloadImage(image,token);}
       catch(e){
         const code=e instanceof BridgeError?e.code:'LINE_CONTENT_UNAVAILABLE';
         if(code==='LINE_CONTENT_UNAVAILABLE' || /^LINE_CONTENT_HTTP_(?:429|5)/.test(code))this.retry(image,code);
@@ -294,9 +403,15 @@ export class OpenClawBridge {
       return this.config.accounts[j.account]?.enabled && ['pending','ready'].includes(j.state) && j.due<=this.now();
     });
     if (!job) return;
-    const cfg=structuredClone(this.config);
+    if (!this.snapshotValid(job)) { job.state='unknown'; job.error='SNAPSHOT_INVALID_REVIEW_REQUIRED'; this.save(job); return; }
+    // A job runs only with its own credential revision. Missing revision data fails
+    // closed instead of silently borrowing whichever token is configured now.
+    const token=this.credential(job.credential_revision);
+    if (!token) { job.state='unknown'; job.error='CREDENTIAL_REVISION_MISSING'; this.save(job); return; }
+    const cfg:EndpointSnapshot={...(job.snapshot as Omit<EndpointSnapshot,'token'>),token};
     const sender=this.deps.sender(job.account);
-    if (!sender || !this.deps.hasAlias(job.account,job.who)) { job.state='failed';job.error='ALIAS_NOT_FOUND';this.save(job);return; }
+    if (!sender || !this.deps.hasAlias(job.account,job.who) || !job.recipient) { job.state='failed';job.error='ALIAS_SNAPSHOT_REQUIRED';this.save(job);return; }
+    const family=cfg.protocol==='family-text-v1';
     if (job.state==='pending') {
       try {
         if(job.event.message_type==='image' && !job.input_image)return;
@@ -304,30 +419,36 @@ export class OpenClawBridge {
           {type:'input_text',text:'請閱讀這張使用者傳來的圖片並回覆。'}, {type:'input_image',source:{type:'base64',media_type:job.input_image.split(';')[0]!.slice(5),data:job.input_image.split(',')[1]}}
         ] : [{type:'input_text',text:job.event.text??''}];
         job.state='generating';this.save(job);
+        // family-text-v1 is a fixed, text-only contract: no agent id, no session key,
+        // and no route from this endpoint to any tool.
         const response=await this.fetcher(cfg.url,{method:'POST',redirect:'error',
-          headers:{Authorization:`Bearer ${cfg.token}`,'Content-Type':'application/json','x-openclaw-agent-id':cfg.agent,
-            'x-openclaw-session-key':`line-oa-multi:${job.account}:${job.lane}`},
-          body:JSON.stringify({model:`openclaw/${cfg.agent}`,stream:false,user:`line-oa-multi:${job.account}:${job.lane}`,
-            input:[{type:'message',role:'user',content:input}]}),
+          headers:family?{Authorization:`Bearer ${cfg.token}`,'Content-Type':'application/json'}:
+            {Authorization:`Bearer ${cfg.token}`,'Content-Type':'application/json','x-openclaw-agent-id':cfg.agent,
+              'x-openclaw-session-key':job.snapshot!.session_key},
+          body:family?JSON.stringify({version:1,event_id:job.event.webhook_event_id,group_id:job.event.group_id,text:job.event.text??''}):
+            JSON.stringify({model:`openclaw/${cfg.agent}`,stream:false,user:job.snapshot!.session_key,
+              input:[{type:'message',role:'user',content:input}]}),
           signal:AbortSignal.any([this.abort.signal,AbortSignal.timeout(cfg.timeout_seconds*1000)])});
         if (!response.ok) {
           await response.body?.cancel();
           // An explicit refusal before a run can be retried; a server error may
           // follow committed agent tool effects and therefore needs review.
-          if (response.status===429 || (response.status===503 && response.headers.get('x-line-oa-retry-safe')==='before-agent')) {
-            job.state='pending';return fail(`OPENCLAW_HTTP_${response.status}`);
-          }
+          if (!family && response.status===429) { job.state='pending';return fail('OPENCLAW_HTTP_429'); }
+          if (family && response.status===503 && response.headers.get('x-line-oa-retry-safe')==='before-agent') { job.state='pending';return fail('FAMILY_HTTP_RETRY_SAFE'); }
           return fail(`OPENCLAW_HTTP_${response.status}`);
         }
-        const outputs=parseAnswer(JSON.parse((await boundedBody(response,MAX_BODY)).toString('utf8')));
+        const decoded=JSON.parse((await boundedBody(response,MAX_BODY)).toString('utf8'));
+        const outputs=family ? parseFamilyAnswer(decoded) : parseAnswer(decoded);
         this.checkCapacity(Buffer.byteLength(JSON.stringify(outputs)));
         job.outputs=outputs;job.total=outputs.length;
         job.state='ready';job.error=null;job.attempts=0;this.save(job);
       } catch (e) {
-        if(job.state==='generating' && connectFailure(e))job.state='pending';
-        const code=e instanceof BridgeError ? e.code : job.state==='generating'?'OPENCLAW_RESULT_UNCERTAIN':'LINE_CONTENT_UNAVAILABLE';
+        const disconnected=job.state==='generating' && connectFailure(e);
+        if(disconnected)job.state='pending';
+        const code=e instanceof BridgeError ? e.code : disconnected?'OPENCLAW_CONNECT_UNAVAILABLE':
+          job.state==='generating'?'OPENCLAW_RESULT_UNCERTAIN':'LINE_CONTENT_UNAVAILABLE';
         job.error=code;
-        if (job.state==='pending' && (['LINE_CONTENT_UNAVAILABLE','OPENCLAW_HTTP_429','OPENCLAW_HTTP_503'].includes(code) || /^LINE_CONTENT_HTTP_5/.test(code))) {
+        if (job.state==='pending' && ((!family && ['OPENCLAW_CONNECT_UNAVAILABLE','LINE_CONTENT_UNAVAILABLE','OPENCLAW_HTTP_429','OPENCLAW_HTTP_503'].includes(code)) || (family && code==='FAMILY_HTTP_RETRY_SAFE') || /^LINE_CONTENT_HTTP_5/.test(code))) {
           this.retry(job,code);
         } else { job.state='failed';this.save(job); }
         return;
@@ -338,8 +459,8 @@ export class OpenClawBridge {
       job.state='sending';this.save(job);
       let result: SendResult;
       try {
-        result=part.type==='text'?await sender.send(job.who,part.text):
-          await sender.sendImage(job.who,Buffer.from(part.data.split(',')[1]!, 'base64'),part.mime);
+        result=part.type==='text'?await sender.send(job.who,part.text,job.recipient):
+          await sender.sendImage(job.who,Buffer.from(part.data.split(',')[1]!, 'base64'),part.mime,job.recipient);
       } catch(e) {
         // The existing sender throws its preflight errors before issuing a send.
         const code=e instanceof Error?e.message:'';
@@ -380,6 +501,8 @@ export class OpenClawBridge {
     if (job.attempts>=8) job.state='failed';
     job.due=this.now()+Math.min(300_000,5000*2**job.attempts);this.save(job);
   }
+  async pause(): Promise<void> { this.paused=true; if(this.timer)clearInterval(this.timer); this.timer=undefined; await Promise.all([this.task?.catch(()=>undefined),this.mediaTask?.catch(()=>undefined)]); }
+  resume(): void { if(this.stopping)return; this.paused=false; this.start(); }
   stop(): Promise<void> {
     if(this.stopped)return this.stopped;
     this.stopping=true;if(this.timer)clearInterval(this.timer);this.abort.abort();

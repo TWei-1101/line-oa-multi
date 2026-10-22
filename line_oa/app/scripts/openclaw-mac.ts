@@ -1,9 +1,10 @@
 /** Optional Mac adapter. Run with Node 24: node openclaw-mac.ts
  * Secrets are environment variables; no request bodies or tokens are logged.
  * Converts local MEDIA:/Markdown image references to inline image response parts.
+ * Supports /new, /reset, /model, /models direct commands from LINE.
  */
 import http from 'node:http';
-import { open, realpath } from 'node:fs/promises';
+import { open, realpath, readFile, writeFile } from 'node:fs/promises';
 import { resolve, relative, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
@@ -72,6 +73,42 @@ export async function inlineMedia(response: Record<string,unknown>, root: string
   if(Buffer.byteLength(JSON.stringify(result))>MAX_BYTES)throw new Error('MEDIA_RESPONSE_TOO_LARGE');
   return result;
 }
+
+// Persistent session and model routing storage across requests
+const STATE_FILE = join(homedir(), '.openclaw', 'line-oa-bridge-sessions.json');
+type SessionMap = Record<string, { epoch: number; model?: string }>;
+async function loadSessions(): Promise<SessionMap> {
+  try {
+    const raw = await readFile(STATE_FILE, 'utf8');
+    return JSON.parse(raw) as SessionMap;
+  } catch {
+    return {};
+  }
+}
+async function saveSessions(data: SessionMap): Promise<void> {
+  try {
+    await writeFile(STATE_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+  } catch {}
+}
+
+function singleReply(text: string): Record<string, unknown> {
+  return {
+    status: 'completed',
+    output: [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [
+          {
+            type: 'output_text',
+            text: text
+          }
+        ]
+      }
+    ]
+  };
+}
+
 type AdapterOptions={gatewayUrl:string;gatewayToken:string;bridgeToken:string;mediaRoot:string;timeoutMs?:number;fetcher?:typeof fetch};
 export function createMacAdapter(options:AdapterOptions): http.Server {
   const base=new URL(options.gatewayUrl);
@@ -92,15 +129,72 @@ export function createMacAdapter(options:AdapterOptions): http.Server {
       for await(const chunk of req){size+=chunk.length;if(size>20*1024*1024)return reply(413,{error:'REQUEST_TOO_LARGE'});chunks.push(Buffer.from(chunk));}
       const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if(!body || typeof body!=='object' || Array.isArray(body) || body.stream===true)return reply(400,{error:'NON_STREAMING_JSON_REQUIRED'});
+
+      // Parse user incoming text
+      let userText: string | undefined;
+      const firstMsg = Array.isArray(body.input) && body.input[0];
+      if (firstMsg && Array.isArray(firstMsg.content)) {
+        for (const part of firstMsg.content) {
+          if (part && part.type === 'input_text' && typeof part.text === 'string') {
+            userText = part.text.trim();
+          }
+        }
+      }
+
+      const headers:Record<string,string>={'Content-Type':'application/json',Authorization:`Bearer ${options.gatewayToken}`};
+      for(const key of ['x-openclaw-agent-id','x-openclaw-session-key']){
+        const v=req.headers[key];if(typeof v==='string' && v.length<512)headers[key]=v;
+      }
+      const agentId=headers['x-openclaw-agent-id']?.trim() ||
+        (typeof body.model==='string' && body.model.startsWith('openclaw/')?body.model.slice('openclaw/'.length).trim():'');
+      const rawSessionKey=headers['x-openclaw-session-key']?.trim() || 'default';
+      const baseKey = rawSessionKey.startsWith('agent:') ? rawSessionKey : `agent:${agentId ? agentId.toLowerCase() : 'main'}:${rawSessionKey}`;
+
+      const sessions = await loadSessions();
+      const currentMeta = sessions[baseKey] || { epoch: 1 };
+
+      // Handle /new or /reset command
+      if (userText === '/new' || userText === '/reset') {
+        currentMeta.epoch = (currentMeta.epoch || 1) + 1;
+        sessions[baseKey] = currentMeta;
+        await saveSessions(sessions);
+        return reply(200, singleReply('已開啟新對話 ✅\n歷史上下文已重置。'));
+      }
+
+      // Handle /model or /model <name> command
+      if (userText && /^\/model(?:\s+.*)?$/i.test(userText)) {
+        const parts = userText.split(/\s+/);
+        if (parts.length === 1) {
+          const current = currentMeta.model || '預設 (minimax-portal/MiniMax-M3)';
+          return reply(200, singleReply(`目前此對話模型為：${current}\n\n如需更換，請輸入：/model <模型名稱>\n查詢可用模型請輸入：/models`));
+        }
+        const targetModel = parts.slice(1).join(' ').trim();
+        if (targetModel.toLowerCase() === 'default' || targetModel.toLowerCase() === 'reset') {
+          delete currentMeta.model;
+          sessions[baseKey] = currentMeta;
+          await saveSessions(sessions);
+          return reply(200, singleReply('已恢復使用預設模型 (minimax-portal/MiniMax-M3) ✅'));
+        }
+        currentMeta.model = targetModel;
+        sessions[baseKey] = currentMeta;
+        await saveSessions(sessions);
+        return reply(200, singleReply(`模型已切換為：${targetModel} ✅`));
+      }
+
+      // Session key with epoch isolation
+      headers['x-openclaw-session-key'] = `${baseKey}:e${currentMeta.epoch || 1}`;
+
+      // Model override if configured for this session
+      if (currentMeta.model) {
+        headers['x-openclaw-model'] = currentMeta.model;
+      }
+
       body.instructions=[typeof body.instructions==='string'?body.instructions:'',
         'Your final answer is relayed to LINE by an external bridge. Do not use LINE/channel message tools to send it.',
         'Return the entire final answer as a JSON object, without Markdown fences: {"line_oa_reply":[{"type":"text","text":"your complete answer"}]}.',
         `If you create images, save JPEG/PNG files under ${options.mediaRoot} and include ordered {"type":"image","path":"absolute file path"} parts in line_oa_reply.`,
         'Include all answer text and image paths; do not replace your answer with a summary or use MEDIA: directives.'].filter(Boolean).join('\n');
-      const headers:Record<string,string>={'Content-Type':'application/json',Authorization:`Bearer ${options.gatewayToken}`};
-      for(const key of ['x-openclaw-agent-id','x-openclaw-session-key']){
-        const v=req.headers[key];if(typeof v==='string' && v.length<512)headers[key]=v;
-      }
+
       let upstream:Response;
       try{
         upstream=await fetcher(endpoint,{method:'POST',headers,body:JSON.stringify(body),redirect:'error',

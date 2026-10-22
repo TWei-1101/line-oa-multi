@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/src/multi-server.js",
+    "start": "node dist/scripts/controlled-start.js",
+    "family-bridge": "node dist/scripts/family-bridge-server.js",
+    "family-downgrade-preflight": "node dist/scripts/family-downgrade-preflight.js",
     "test": "npm run build && node --test dist/tests/*.test.js"
   },
   "devDependencies": {

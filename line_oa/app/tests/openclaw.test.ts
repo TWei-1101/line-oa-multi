@@ -21,7 +21,7 @@ async function fixture(fetcher:typeof fetch = async()=>Response.json(answer('完
   const sender={send:async(who:string,text:string)=>{sent.push({who,text});return ok();},
     sendImage:async(who:string,image:Buffer)=>{sent.push({who,image});return ok();}};
   let now=Date.now();
-  const deps={sender:()=>sender,hasAlias:()=>true,fetch:fetcher,now:()=>now};
+  const deps={sender:()=>sender,hasAlias:()=>true,resolveAlias:(_account:string,who:string)=>'chat-'+who,fetch:fetcher,now:()=>now};
   let bridge=new OpenClawBridge(root,deps);await bridge.load();
   bridge.configure({url:'http://mac.local:18790/v1/responses',token:'secret',agent:'main',timeout_seconds:300});
   bridge.configure({enabled:true,channel_access_token:'line-secret',routes:[{source_type:'user',source_id:user,who:'simon'}]},'aiassistant');
@@ -154,6 +154,7 @@ test('offline Mac reconnects safely and later image content is cached while an e
   try{
     f.bridge.enqueue([event(),{...event('event-image-002'),message_type:'image',message_id:'12345'}]);
     await f.bridge.tick();assert.equal(images,1);assert.equal(f.bridge.status().counts.pending,2);
+    assert.equal(f.bridge.status().jobs.filter(j=>j.error==='OPENCLAW_CONNECT_UNAVAILABLE').length,1);
     connected=true;f.advance();await f.restart();await f.bridge.tick();await f.bridge.tick();
     assert.equal(images,1);assert.equal(generations,3);assert.equal(f.sent.length,2);
   }finally{await f.close();}
@@ -239,4 +240,20 @@ test('Mac adapter embeds local image parts, preserves text and rejects paths out
       assert.equal(response.status,200);assert.equal(parseAnswer(await response.json())[0]?.type,'image');
     }finally{await new Promise<void>(resolve=>{server.close(()=>resolve());server.closeAllConnections();});}
   }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('pause drains blocked media fetch without abort, freezes new ticks and image token is enqueue-time revision',async()=>{
+ let release!:()=>void,entered!:()=>void;const gate=new Promise<void>(r=>release=r),started=new Promise<void>(r=>entered=r);const tokens:string[]=[];
+ const f=await fixture(async(url,init)=>{if(String(url).startsWith('https://api-data.line.me/')){tokens.push(new Headers(init?.headers).get('authorization')!);entered();await gate;return new Response(Buffer.from(png.split(',')[1]!,'base64'),{headers:{'content-type':'image/png'}});}return Response.json(answer('done'));});
+ try{
+  f.bridge.enqueue([{...event('media-drain'),message_type:'image',message_id:'123'}]);f.bridge.configure({channel_access_token:'rotated-line-token'},'aiassistant');const active=f.bridge.tick();await started;
+  let drained=false;const pause=f.bridge.pause().then(()=>drained=true);await Promise.resolve();assert.equal(drained,false);release();await pause;await active;assert.deepEqual(tokens,['Bearer line-secret']);assert.equal(drained,true);assert.equal(f.bridge.status().paused,true);
+  f.bridge.enqueue([event('next-paused')]);f.bridge.start();await f.bridge.tick();assert.equal(f.bridge.status().counts.pending,1);
+ }finally{release?.();await f.close();}
+});
+test('invalid endpoint revision holds image job BEFORE media download',async()=>{
+ let calls=0;const f=await fixture(async()=>{calls++;return Response.json(answer('must not execute'));});try{
+  f.bridge.enqueue([{...event('media-revision'),message_type:'image',message_id:'123'}]);const db=new DatabaseSync(f.root+'/openclaw.sqlite');const row=db.prepare('SELECT body FROM jobs').get() as any;const job=JSON.parse(row.body);db.prepare('DELETE FROM credential_revisions WHERE id=?').run(job.credential_revision);db.close();
+  await f.bridge.tick();assert.equal(calls,0);assert.equal(f.bridge.status().counts.unknown,1);
+ }finally{await f.close();}
 });

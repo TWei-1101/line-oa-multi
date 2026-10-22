@@ -20,6 +20,7 @@ import { parseImageMultipart } from './multipart.js';
 
 export interface GatewayOptions {
   dataDir?: string;
+  aliasMutationGuard?: (alias:string)=>void;
   authManager?: AuthManager;
   disableDiscovery?: boolean;
   lineRequest?: RequestFn;
@@ -101,6 +102,7 @@ async function bodyBuffer(req: IncomingMessage, maxBytes: number): Promise<Buffe
   return Buffer.concat(chunks);
 }
 function errorStatus(code: string): number {
+  if(code==='OPENCLAW_JOBS_PENDING')return 409;
   if (['INVALID_INPUT', 'INVALID_JSON', 'INVALID_ALIAS', 'INVALID_MESSAGE', 'INVALID_TARGET'].includes(code)) return 400;
   if (['IMAGE_TYPE_NOT_ALLOWED', 'IMAGE_SIGNATURE_INVALID'].includes(code)) return 400;
   if (code === 'IMAGE_SIZE_LIMIT') return 413;
@@ -301,11 +303,11 @@ const handleUi = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (req.method === 'GET' && path === '/api/aliases') return json(res, 200, { aliases: contacts.getAliases() });
     if (req.method === 'PUT' && path === '/api/aliases') {
-      const body = await bodyJson(req); await contacts.setAlias(String(body.alias ?? ''), String(body.chatId ?? ''));
+      const body = await bodyJson(req); options.aliasMutationGuard?.(String(body.alias??'')); await contacts.setAlias(String(body.alias ?? ''), String(body.chatId ?? ''));
       logger.add('ALIAS_SET', 'SUCCESS', String(body.alias ?? '')); return json(res, 200, { aliases: contacts.getAliases() });
     }
     if (req.method === 'DELETE' && path.startsWith('/api/aliases/')) {
-      const alias = decodeURIComponent(path.slice('/api/aliases/'.length)); await contacts.deleteAlias(alias); logger.add('ALIAS_DELETE', 'SUCCESS', alias); return json(res, 200, { aliases: contacts.getAliases() });
+      const alias = decodeURIComponent(path.slice('/api/aliases/'.length)); options.aliasMutationGuard?.(alias); await contacts.deleteAlias(alias); logger.add('ALIAS_DELETE', 'SUCCESS', alias); return json(res, 200, { aliases: contacts.getAliases() });
     }
     if (req.method === 'POST' && path === '/api/messages/send') {
       const body = await bodyJson(req); const target = typeof body.target === 'string' ? body.target : ''; const message = typeof body.message === 'string' ? body.message : '';

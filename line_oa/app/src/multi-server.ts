@@ -10,6 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createGateway } from './server.js';
 import { DATA_DIR, loadConfig } from './config.js';
+import { multiDataPaths } from './data-paths.js';
 import { readJsonSafe, atomicWriteJson, ensurePrivateDir } from './storage.js';
 import { trustedIngress, ingressPath, ingressMutationAllowed } from './ingress.js';
 import { parseRequestId, requestFingerprint, RequestDeduplicator, sendResponse } from './api-v1.js';
@@ -63,7 +64,7 @@ async function jsonBody(req: IncomingMessage): Promise<Record<string,unknown>> {
 }
 
 export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressTrust?: typeof trustedIngress } = {}) {
-  const rootDir = join(dataDir,'multi');
+  const {rootDir} = multiDataPaths(dataDir);
   const accountDir = join(rootDir,'accounts');
   const registryPath = join(rootDir,'accounts.json');
   let bridge: OpenClawBridge | undefined;
@@ -95,6 +96,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
       dataDir:join(accountDir,id),
       authManager:control.auth,
       disableDiscovery:true,
+      aliasMutationGuard:alias=>{if(bridge?.hasOutstanding(id,alias))throw new BridgeError('OPENCLAW_JOBS_PENDING',409);},
       ingressTrust:options.ingressTrust
     });
     instance.startEmbedded();
@@ -112,7 +114,9 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
   }
   bridge = new OpenClawBridge(rootDir,{
     sender:account=>running.get(account)?.sender,
-    hasAlias:(account,who)=>!!running.get(account)?.contacts.resolve(who)
+    boundDestination:account=>webhook.boundDestination(account),
+    hasAlias:(account,who)=>!!running.get(account)?.contacts.resolve(who),
+    resolveAlias:(account,who)=>running.get(account)?.contacts.resolve(who)?.chatId
   });
   try { await bridge.load(); }
   catch(e) { for(const gw of running.values())await gw.stop();await control.stop();throw e; }
@@ -205,6 +209,12 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
           openclaw.configure(body,id);
         }
         return reply(res,200,{...openclaw.status(id),aliases:gw.contacts.listAliases(),sources:webhook.recentSources(id)});
+      }
+      if(path==='/api/openclaw/worker' && req.method==='POST'){
+        if(!requireBrowser(req,res,true))return;
+        const body=await jsonBody(req);
+        if(body.action==='pause')await openclaw.pause();else if(body.action==='resume')openclaw.resume();else return error(res,'INVALID_WORKER_ACTION');
+        return reply(res,200,openclaw.status());
       }
       const review=/^\/api\/openclaw\/jobs\/([a-f0-9]{64})$/.exec(path);
       if(review && req.method==='POST') {

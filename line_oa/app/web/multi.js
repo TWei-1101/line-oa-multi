@@ -117,6 +117,7 @@ async function openAccountBridge(id){
   const data=await request(`api/accounts/${encodeURIComponent(id)}/openclaw`);
   const cfg=data.accounts[id]||{enabled:false,routes:[]};const parent=showBridge(`${id} → OpenClaw`);
   const enabled=field(parent,'啟用自動回覆','checkbox');enabled.checked=cfg.enabled;
+  for(const [action,text] of [['pause','暫停並排空 Worker'],['resume','繼續 Worker']]){const button=label('button',text);button.type='button';button.onclick=async()=>{button.disabled=true;try{await request('api/openclaw/worker',{method:'POST',body:JSON.stringify({action})});el('feedback').textContent=action==='pause'?'Worker 已排空並暫停':'Worker 已恢復';}catch(e){el('claw-error').textContent=e.message;}finally{button.disabled=false;}};parent.append(button);}
   const token=field(parent,`LINE Channel Access Token（下載收到的圖片用；${cfg.channel_access_token_configured?'已設定，留空沿用':'未設定'}）`,'password');
   const clear=field(parent,'清除已儲存的 LINE Token','checkbox');
   parent.append(label('p','只處理下方綁定的來源。先從 LINE 傳送訊息到 HA，再按重新開啟本設定，可從最近來源選取 ID。群組來源代表整個群組。'));
@@ -139,7 +140,21 @@ async function openAccountBridge(id){
   cfg.routes.forEach(addRoute);
   const add=label('button','新增來源綁定');add.type='button';add.onclick=()=>addRoute();parent.append(add);
   if(!data.aliases.length)parent.append(label('p','請先在「管理／登入」中為收件人建立別名，再回到這裡綁定。'));
-  saveBridge=()=>request(`api/accounts/${encodeURIComponent(id)}/openclaw`,{method:'PUT',body:JSON.stringify({enabled:enabled.checked,routes:[...rows.children].map(row=>row.readRoute()),...(clear.checked?{channel_access_token:''}:token.value?{channel_access_token:token.value}:{})})});
+  let familySave=()=>({});
+  if(id==='family'){
+    parent.append(label('h3','Family 專用端點（預設停用）'));
+    const expected=field(parent,'預期 Family Bot destination（由管理者確認，非從封包學習）','text',cfg.expected_destination||'');
+    const override=field(parent,'使用 Family 專用端點','checkbox');override.checked=cfg.endpoint?.mode==='override';
+    const endpointUrl=field(parent,'Family API 網址','url',cfg.endpoint?.url||'');
+    const endpointToken=field(parent,'Family Bridge Token（'+(cfg.endpoint?.token_configured?'已設定，留空沿用':'尚未設定')+'）','password');
+    const endpointAgent=field(parent,'固定 Agent','text',cfg.endpoint?.agent||'family-line');
+    const endpointTimeout=field(parent,'Family 等待秒數','number',String(cfg.endpoint?.timeout_seconds||30));
+    const protocol=document.createElement('select');const proto=label('option','family-text-v1');proto.value='family-text-v1';protocol.append(proto);parent.append(label('label','Family Protocol'),protocol);
+    const admission=document.createElement('select');for(const [v,t] of [['legacy','一般模式（不可啟用 Family）'],['self-mention-group-text','僅群組 @Bot 文字']]){const o=label('option',t);o.value=v;admission.append(o);}admission.value=cfg.admission||'legacy';parent.append(label('label','Family Admission'),admission);
+    parent.append(label('p','只會送出群組中的已驗證 @Bot 文字。完成安全傳輸、群組映射與部署驗證前請保持停用。'));
+    familySave=()=>({expected_destination:expected.value.trim(),admission:admission.value,endpoint:override.checked?{mode:'override',url:endpointUrl.value.trim(),agent:endpointAgent.value.trim(),timeout_seconds:Number(endpointTimeout.value),protocol:'family-text-v1',...(endpointToken.value?{token:endpointToken.value}:{})}:{mode:'inherit'}});
+  }
+  saveBridge=()=>request('api/accounts/'+encodeURIComponent(id)+'/openclaw',{method:'PUT',body:JSON.stringify({...familySave(),enabled:enabled.checked,routes:[...rows.children].map(row=>row.readRoute()),...(clear.checked?{channel_access_token:''}:token.value?{channel_access_token:token.value}:{})})});
 }
 async function reloadBridge(){
   const data=await request('api/openclaw'),c=data.counts;

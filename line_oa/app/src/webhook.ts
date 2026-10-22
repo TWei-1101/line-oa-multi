@@ -15,6 +15,7 @@ const MAX_BODY = 256 * 1024;
 
 export type HookSettings = { enabled: boolean; channelSecret: string; destination?: string };
 type StoredHooks = { version: 1; accounts: Record<string, HookSettings> };
+export type Mention = { index: number; length: number; type: string; userId?: string; isSelf?: boolean };
 export type ReceivedEvent = {
   sequence: number;
   account: string;
@@ -29,6 +30,9 @@ export type ReceivedEvent = {
   room_id?: string;
   timestamp?: number;
   is_redelivery: boolean;
+  mentions?: Mention[];
+  /** Channel-Secret-bound bot user id of this account; admission needs it. */
+  destination?: string;
 };
 type Inbox = { version: 1; nextSequence: number; events: ReceivedEvent[] };
 type HookLineEvent = {
@@ -36,7 +40,7 @@ type HookLineEvent = {
   type?: unknown;
   timestamp?: unknown;
   deliveryContext?: { isRedelivery?: unknown };
-  message?: { type?: unknown; text?: unknown; id?: unknown };
+  message?: { type?: unknown; text?: unknown; id?: unknown; mention?: { mentionees?: unknown } };
   source?: { type?: unknown; userId?: unknown; groupId?: unknown; roomId?: unknown };
 };
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -58,6 +62,34 @@ export class WebhookError extends Error {
   constructor(public readonly code: string, public readonly status: number) {
     super(code);
   }
+}
+
+function wellFormed(text: string): boolean {
+  for (let i=0;i<text.length;i++) { const c=text.charCodeAt(i); if(c>=0xd800&&c<=0xdbff){const d=text.charCodeAt(++i);if(!(d>=0xdc00&&d<=0xdfff))return false;}else if(c>=0xdc00&&c<=0xdfff)return false; } return true;
+}
+function validMentionList(value: unknown, original: string, retained: string): value is Mention[] {
+  return Array.isArray(value) && value.length<=50 && Buffer.byteLength(JSON.stringify(value))<=16384 && wellFormed(original) && value.every(m=>{
+    if(!isObject(m)||!Number.isSafeInteger(m.index)||!Number.isSafeInteger(m.length)||Number(m.index)<0||Number(m.length)<=0||!['user','all'].includes(String(m.type)))return false;
+    const start=Number(m.index),end=start+Number(m.length);
+    if(end>original.length||end>retained.length)return false;
+    const a=original.charCodeAt(start),b=original.charCodeAt(end-1);
+    if((a>=0xdc00&&a<=0xdfff)||(b>=0xd800&&b<=0xdbff))return false;
+    return (!Object.hasOwn(m,'userId')||(typeof m.userId==='string'&&DEST.test(m.userId)))&&(!Object.hasOwn(m,'isSelf')||typeof m.isSelf==='boolean');
+  });
+}
+export function familyMentionAdmitted(e: ReceivedEvent, policy: {account:string;groups:ReadonlySet<string>;destination:string}): boolean {
+  if (e.account !== policy.account || e.source_type !== 'group' || !e.group_id || !policy.groups.has(e.group_id) || e.message_type !== 'text' || !e.text || !Array.isArray(e.mentions)) return false;
+  if (!DEST.test(policy.destination) || !validMentionList(e.mentions,e.text,e.text)) return false;
+  return e.mentions.some(m => {
+    if (!Number.isInteger(m.index) || !Number.isInteger(m.length) || m.index < 0 || m.length <= 0 || m.index + m.length > e.text!.length || m.type !== 'user') return false;
+    const start=e.text!.charCodeAt(m.index), end=e.text!.charCodeAt(m.index+m.length-1);
+    if ((start>=0xdc00&&start<=0xdfff)||(end>=0xd800&&end<=0xdbff)) return false;
+    const hasSelf=Object.prototype.hasOwnProperty.call(m,'isSelf'), hasUser=Object.prototype.hasOwnProperty.call(m,'userId');
+    if (hasSelf && typeof m.isSelf !== 'boolean') return false;
+    if (hasUser && (typeof m.userId !== 'string' || !DEST.test(m.userId))) return false;
+    if (m.isSelf === false || (m.isSelf === true && hasUser && m.userId !== policy.destination)) return false;
+    return (m.isSelf === true && !hasUser) || (m.userId === policy.destination);
+  });
 }
 
 export function verifyLineSignature(secret: string, body: Buffer, signature: string): boolean {
@@ -86,6 +118,7 @@ export class MultiWebhook {
     const settings = this.settings.accounts[account];
     return { account, enabled: !!settings?.enabled, configured: !!settings?.channelSecret };
   }
+  boundDestination(account:string):string|undefined { return this.settings.accounts[account]?.destination; }
   private async serialized<T>(fn: () => Promise<T>): Promise<T> {
     const prev = this.pending;
     let release!: () => void;
@@ -162,18 +195,32 @@ export class MultiWebhook {
         known.add(key);
         const src = e.source;
         const msg = e.message;
+        const rawMentions = msg?.mention?.mentionees;
+        const retainedText=typeof msg?.text==='string' ? msg.text.slice(0,5000).replace(/[\uD800-\uDBFF]$/,'') : '';
+        const metadataOK=Buffer.byteLength(JSON.stringify(msg?.mention??{}))<=16384;
+        const mentions: Mention[] | undefined = metadataOK && typeof msg?.text==='string' && validMentionList(rawMentions,msg.text,retainedText) ? rawMentions.map(v => {
+          if (!isObject(v)) return { index: -1, length: -1, type: '' };
+          const r: Mention = { index: v.index as number, length: v.length as number, type: v.type as string };
+          if (Object.prototype.hasOwnProperty.call(v, 'userId')) r.userId = v.userId as string;
+          if (Object.prototype.hasOwnProperty.call(v, 'isSelf')) r.isSelf = v.isSelf as boolean;
+          return r;
+        }) : undefined;
         const received: ReceivedEvent = {
           sequence: next.nextSequence++, account, webhook_event_id: e.webhookEventId,
           type: e.type,
           ...(typeof msg?.type === 'string' ? {message_type: msg.type.slice(0,32)} : {}),
           ...(typeof msg?.id === 'string' && /^[0-9]{1,64}$/.test(msg.id) ? {message_id:msg.id} : {}),
-          ...(msg?.type === 'text' && typeof msg.text === 'string' ? {text: msg.text.slice(0,5000)} : {}),
+          ...(msg?.type === 'text' && typeof msg.text === 'string' ? {text: retainedText} : {}),
           ...(typeof src?.type === 'string' ? {source_type:src.type.slice(0,32)} : {}),
           ...(typeof src?.userId === 'string' ? {user_id:src.userId.slice(0,128)} : {}),
           ...(typeof src?.groupId === 'string' ? {group_id:src.groupId.slice(0,128)} : {}),
           ...(typeof src?.roomId === 'string' ? {room_id:src.roomId.slice(0,128)} : {}),
           ...(typeof e.timestamp === 'number' && Number.isSafeInteger(e.timestamp) ? {timestamp:e.timestamp} : {}),
-          is_redelivery: e.deliveryContext?.isRedelivery === true
+          // The Channel Secret already bound this destination; admission needs it to
+          // recognise a mention of this bot rather than of anyone else.
+          destination: packet.destination,
+          is_redelivery: e.deliveryContext?.isRedelivery === true,
+          ...(mentions ? {mentions} : {})
         };
         next.events.push(received);
         fresh.push(received);

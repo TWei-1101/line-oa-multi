@@ -18,11 +18,13 @@ export class MessageSender {
 
   isBusy(): boolean { return this.active; }
 
-  async send(alias: string, message: string): Promise<SendResult> {
+  async send(alias: string, message: string, expectedTarget?: string): Promise<SendResult> {
     if (!/^[a-z0-9_-]{1,32}$/.test(alias)) throw new Error('INVALID_TARGET');
     if (typeof message !== 'string' || !message.trim() || message.length > 5000 || /\u0000/.test(message)) throw new Error('INVALID_MESSAGE');
     const target = this.contacts.resolve(alias);
     if (!target) throw new Error('TARGET_NOT_ALLOWED');
+    const chatId = target.chatId;
+    if (expectedTarget !== undefined && expectedTarget !== chatId) throw new Error('TARGET_CHANGED');
     if (this.active) throw new Error('SEND_BUSY');
     const now = Date.now();
     this.rate = this.rate.filter(value => now - value < 60_000);
@@ -46,7 +48,7 @@ export class MessageSender {
         this.logger.add('SEND_TEXT', 'FAILED', alias, kind);
         throw new Error(`SESSION_${kind}`);
       }
-      const result = await this.client.sendText(target.chatId, message);
+      const result = await this.client.sendText(chatId, message);
       if (result.result === 'SUBMITTED') {
         this.submittedCount += 1;
         this.lastSubmittedAt = new Date().toISOString();
@@ -61,10 +63,12 @@ export class MessageSender {
     } finally { this.active = false; }
   }
 
-  async sendImage(alias: string, image: Buffer, mime: 'image/jpeg' | 'image/png'): Promise<SendResult> {
+  async sendImage(alias: string, image: Buffer, mime: 'image/jpeg' | 'image/png', expectedTarget?: string): Promise<SendResult> {
     if (!/^[a-z0-9_-]{1,32}$/.test(alias)) throw new Error('INVALID_TARGET');
     const target = this.contacts.resolve(alias);
     if (!target) throw new Error('TARGET_NOT_ALLOWED');
+    const chatId = target.chatId;
+    if (expectedTarget !== undefined && expectedTarget !== chatId) throw new Error('TARGET_CHANGED');
     if (this.active) throw new Error('SEND_BUSY');
     const now = Date.now();
     this.rate = this.rate.filter(value => now - value < 60_000);
@@ -88,7 +92,7 @@ export class MessageSender {
         this.logger.add('SEND_IMAGE', 'FAILED', alias, kind);
         throw new Error(`SESSION_${kind}`);
       }
-      const result = await this.client.sendImage(target.chatId, image, mime);
+      const result = await this.client.sendImage(chatId, image, mime);
       if (result.result === 'SUBMITTED') {
         this.submittedCount += 1;
         this.lastSubmittedAt = new Date().toISOString();
