@@ -68,7 +68,9 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
   const accountDir = join(rootDir,'accounts');
   const registryPath = join(rootDir,'accounts.json');
   let bridge: OpenClawBridge | undefined;
-  const webhook = new MultiWebhook(rootDir,events=>bridge?.enqueue(events));
+  const webhook = new MultiWebhook(rootDir, events => bridge?.enqueue(events), {
+    isAdmitted: event => bridge?.isAdmitted(event) ?? false
+  });
   await webhook.load();
   await ensurePrivateDir(rootDir);
   await ensurePrivateDir(accountDir);
@@ -244,9 +246,10 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
         if(!requireBrowser(req,res,true))return;
         if(!running.has(settings[1]!))return error(res,'ACCOUNT_NOT_FOUND',404);
         const body=await jsonBody(req);
-        if(typeof body.enabled!=='boolean' || (body.channel_secret!==undefined && typeof body.channel_secret!=='string'))
+        if(typeof body.enabled!=='boolean' || (body.channel_secret!==undefined && typeof body.channel_secret!=='string') ||
+           (body.forward_url!==undefined && body.forward_url!==null && typeof body.forward_url!=='string'))
           return error(res,'INVALID_WEBHOOK_SETTINGS',400);
-        await webhook.set(settings[1]!,body.enabled,body.channel_secret as string|undefined);
+        await webhook.set(settings[1]!,body.enabled,body.channel_secret as string|undefined,body.forward_url as string|null|undefined);
         return reply(res,200,webhook.status(settings[1]!));
       }
       const deletion=/^\/api\/accounts\/([a-z][a-z0-9_-]{0,31})$/.exec(path);

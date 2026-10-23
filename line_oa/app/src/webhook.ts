@@ -13,7 +13,7 @@ const MAX_INBOX = 2000;
 const MAX_EVENTS = 100;
 const MAX_BODY = 256 * 1024;
 
-export type HookSettings = { enabled: boolean; channelSecret: string; destination?: string };
+export type HookSettings = { enabled: boolean; channelSecret: string; destination?: string; forwardUrl?: string };
 type StoredHooks = { version: 1; accounts: Record<string, HookSettings> };
 export type Mention = { index: number; length: number; type: string; userId?: string; isSelf?: boolean };
 export type ReceivedEvent = {
@@ -45,12 +45,55 @@ type HookLineEvent = {
 };
 const isObject = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
+function validForwardUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 2048 || !value) return false;
+  try {
+    const u = new URL(value);
+    return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password && !u.hash;
+  } catch {
+    return false;
+  }
+}
+
+export type ForwardResult = { status: number; ok: boolean };
+export type Forwarder = (
+  url: string,
+  body: Buffer,
+  headers: Record<string, string>
+) => Promise<ForwardResult>;
+
+export async function defaultForwardWebhook(
+  url: string,
+  body: Buffer,
+  headers: Record<string, string>
+): Promise<ForwardResult> {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: new Uint8Array(body),
+      signal: AbortSignal.timeout(10_000)
+    });
+    return { status: res.status, ok: res.ok };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[WEBHOOK_FORWARD_FAILED] Failed forwarding to ${url}: ${msg}`);
+    return { status: 502, ok: false };
+  }
+}
+
+export type MultiWebhookOptions = {
+  isAdmitted?: (event: ReceivedEvent) => boolean;
+  forwarder?: Forwarder;
+};
+
 const validSettings = (x: unknown): x is StoredHooks => isObject(x) && x.version === 1 &&
   isObject(x.accounts) && Object.entries(x.accounts).length <= 20 &&
   Object.entries(x.accounts).every(([id, value]) => ACCOUNT.test(id) && isObject(value) &&
     typeof value.enabled === 'boolean' && typeof value.channelSecret === 'string' &&
     /^[A-Za-z0-9_-]{16,128}$/.test(value.channelSecret) &&
-    (value.destination === undefined || (typeof value.destination === 'string' && DEST.test(value.destination))));
+    (value.destination === undefined || (typeof value.destination === 'string' && DEST.test(value.destination))) &&
+    (value.forwardUrl === undefined || (typeof value.forwardUrl === 'string' && validForwardUrl(value.forwardUrl))));
 const validInbox = (x: unknown): x is Inbox => isObject(x) && x.version === 1 &&
   Number.isSafeInteger(x.nextSequence) && (x.nextSequence as number) > 0 &&
   Array.isArray(x.events) && x.events.length <= MAX_INBOX &&
@@ -104,7 +147,8 @@ export class MultiWebhook {
   private inbox: Inbox = { version: 1, nextSequence: 1, events: [] };
   private pending: Promise<void> = Promise.resolve();
   constructor(private readonly dataDir: string,
-    private readonly enqueue?: (events: ReceivedEvent[]) => void) {}
+    private readonly enqueue?: (events: ReceivedEvent[]) => void,
+    private readonly options?: MultiWebhookOptions) {}
   async load(): Promise<void> {
     const a = await readJsonSafe<StoredHooks>(join(this.dataDir, 'webhook-settings.json'),
       { version: 1, accounts: {} }, validSettings);
@@ -114,9 +158,10 @@ export class MultiWebhook {
     this.settings = a.value;
     this.inbox = b.value;
   }
-  status(account: string): { account: string; enabled: boolean; configured: boolean } {
+  status(account: string): { account: string; enabled: boolean; configured: boolean; forward_url?: string } {
     const settings = this.settings.accounts[account];
-    return { account, enabled: !!settings?.enabled, configured: !!settings?.channelSecret };
+    return { account, enabled: !!settings?.enabled, configured: !!settings?.channelSecret,
+      ...(settings?.forwardUrl ? { forward_url: settings.forwardUrl } : {}) };
   }
   boundDestination(account:string):string|undefined { return this.settings.accounts[account]?.destination; }
   private async serialized<T>(fn: () => Promise<T>): Promise<T> {
@@ -127,11 +172,13 @@ export class MultiWebhook {
     try { return await fn(); }
     finally { release(); }
   }
-  async set(account: string, enabled: boolean, secret?: string): Promise<void> {
+  async set(account: string, enabled: boolean, secret?: string, forwardUrl?: string | null): Promise<void> {
     if (!ACCOUNT.test(account)) throw new WebhookError('INVALID_ACCOUNT', 400);
     if (typeof enabled !== 'boolean') throw new WebhookError('INVALID_WEBHOOK_SETTINGS', 400);
     if (secret !== undefined && !/^[A-Za-z0-9_-]{16,128}$/.test(secret))
       throw new WebhookError('INVALID_CHANNEL_SECRET', 400);
+    if (forwardUrl !== undefined && forwardUrl !== null && !validForwardUrl(forwardUrl))
+      throw new WebhookError('INVALID_FORWARD_URL', 400);
     await this.serialized(async () => {
       const old = this.settings.accounts[account];
       const channelSecret = secret ?? old?.channelSecret;
@@ -143,9 +190,15 @@ export class MultiWebhook {
       // carry over. Enable/disable operations preserve the binding.
       const destination = old && (secret === undefined || secret === old.channelSecret)
         ? old.destination : undefined;
+      const effectiveForwardUrl = forwardUrl === null ? undefined : (forwardUrl ?? old?.forwardUrl);
       const next = { version: 1 as const, accounts: {
         ...this.settings.accounts,
-        [account]: { enabled, channelSecret, ...(destination ? { destination } : {}) }
+        [account]: {
+          enabled,
+          channelSecret,
+          ...(destination ? { destination } : {}),
+          ...(effectiveForwardUrl ? { forwardUrl: effectiveForwardUrl } : {})
+        }
       } };
       await atomicWriteJson(join(this.dataDir, 'webhook-settings.json'), next, 0o600);
       this.settings = next;
@@ -247,6 +300,36 @@ export class MultiWebhook {
         next.events = next.events.slice(-MAX_INBOX);
         await atomicWriteJson(join(this.dataDir, 'webhook-inbox.json'), next, 0o600);
         this.inbox = next;
+      }
+      if (settings.forwardUrl) {
+        const isAdmitted = this.options?.isAdmitted ?? (() => false);
+        const admittedSet = new Set(fresh.filter(e => isAdmitted(e)).map(e => e.webhook_event_id));
+        const forwarder = this.options?.forwarder ?? defaultForwardWebhook;
+        if (admittedSet.size === 0) {
+          const fw = await forwarder(settings.forwardUrl, rawBody, {
+            'Content-Type': 'application/json',
+            'X-Line-Signature': signature
+          });
+          if (fw.status !== 200 && fw.status !== 204) {
+            throw new WebhookError('UPSTREAM_FORWARD_FAILED', fw.status >= 400 && fw.status < 600 ? fw.status : 502);
+          }
+        } else if (admittedSet.size < packet.events.length) {
+          const nonAiEvents = (packet.events as HookLineEvent[]).filter(
+            e => typeof e.webhookEventId === 'string' && !admittedSet.has(e.webhookEventId)
+          );
+          if (nonAiEvents.length > 0) {
+            const body = Buffer.from(JSON.stringify({
+              destination: packet.destination,
+              events: nonAiEvents
+            }));
+            const fw = await forwarder(settings.forwardUrl, body, {
+              'Content-Type': 'application/json'
+            });
+            if (fw.status !== 200 && fw.status !== 204) {
+              console.warn(`[WEBHOOK_PARTIAL_FORWARD_WARN] Forwarding non-AI events returned status ${fw.status}`);
+            }
+          }
+        }
       }
       return {accepted, duplicates};
     });

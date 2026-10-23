@@ -298,6 +298,16 @@ export class OpenClawBridge {
     this.config=next;
     this.db.prepare('DELETE FROM jobs WHERE account=?').run(account);
   }
+  isAdmitted(event: ReceivedEvent): boolean {
+    const cfg = this.config.accounts[event.account], lane = sourceKey(event);
+    if (!cfg?.enabled || !lane || event.type !== 'message' || !['text', 'image'].includes(event.message_type ?? '')) return false;
+    if (event.account === 'family') {
+      if (!cfg.expected_destination || event.destination !== cfg.expected_destination || this.deps.boundDestination?.(event.account) !== cfg.expected_destination) return false;
+      if (cfg.admission === 'self-mention-group-text' && !familyMentionAdmitted(event, { account: event.account, groups: groupWhitelist(cfg), destination: cfg.expected_destination ?? '' })) return false;
+    }
+    const route = cfg.routes.find(r => `${r.source_type}:${r.source_id}` === lane);
+    return !!route;
+  }
   /** Called before the webhook returns 200, including redeliveries. A full queue
    * refuses the entire batch. Already submitted IDs are retained for deduplication. */
   enqueue(events: ReceivedEvent[]): void {
@@ -306,14 +316,9 @@ export class OpenClawBridge {
       const all=this.jobs();
       let pending=all.filter(j=>!['submitted','ignored'].includes(j.state)).length;
       for (const event of events) {
-        const cfg=this.config.accounts[event.account], lane=sourceKey(event);
-        if (!cfg?.enabled || !lane || event.type!=='message' || !['text','image'].includes(event.message_type??'')) continue;
-        // Family answers only when the bot itself is @-mentioned in an allowed group;
-        // every other account keeps the legacy all-messages policy.
-        if (event.account==='family' && (!cfg.expected_destination || event.destination!==cfg.expected_destination || this.deps.boundDestination?.(event.account)!==cfg.expected_destination)) continue;
-        if (cfg.admission==='self-mention-group-text' && !familyMentionAdmitted(event,{account:event.account,groups:groupWhitelist(cfg),destination:cfg.expected_destination??''})) continue;
-        const route=cfg.routes.find(r=>`${r.source_type}:${r.source_id}`===lane);
-        if (!route) continue;
+        if (!this.isAdmitted(event)) continue;
+        const cfg=this.config.accounts[event.account]!, lane=sourceKey(event)!;
+        const route=cfg.routes.find(r=>`${r.source_type}:${r.source_id}`===lane)!;
         const id=createHash('sha256').update(`${event.account}\0${event.webhook_event_id}`).digest('hex');
         if (this.db.prepare('SELECT id FROM jobs WHERE id=?').get(id)) continue;
         if (++pending>MAX_PENDING) return fail('OPENCLAW_QUEUE_FULL',503);
