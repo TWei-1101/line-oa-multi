@@ -84,6 +84,8 @@ export async function defaultForwardWebhook(
 
 export type MultiWebhookOptions = {
   isAdmitted?: (event: ReceivedEvent) => boolean;
+  /** Durable bridge ownership keeps retried AI events out of HA after expiry/restart. */
+  ownsEvent?: (account: string, webhookEventId: string) => boolean;
   forwarder?: Forwarder;
 };
 
@@ -147,7 +149,7 @@ export class MultiWebhook {
   private inbox: Inbox = { version: 1, nextSequence: 1, events: [] };
   private pending: Promise<void> = Promise.resolve();
   constructor(private readonly dataDir: string,
-    private readonly enqueue?: (events: ReceivedEvent[]) => void,
+    private readonly enqueue?: (events: ReceivedEvent[]) => unknown,
     private readonly options?: MultiWebhookOptions) {}
   async load(): Promise<void> {
     const a = await readJsonSafe<StoredHooks>(join(this.dataDir, 'webhook-settings.json'),
@@ -237,6 +239,7 @@ export class MultiWebhook {
       const known = new Set(next.events.map(v => `${v.account}:${v.webhook_event_id}`));
       let accepted = 0, duplicates = 0;
       const fresh: ReceivedEvent[] = [];
+      const packetEventIds = new Set<string>();
       for (const value of packet.events) {
         if (!isObject(value)) throw new WebhookError('INVALID_LINE_EVENTS', 400);
         const e = value as HookLineEvent;
@@ -244,6 +247,7 @@ export class MultiWebhook {
             || typeof e.type !== 'string' || e.type.length > 64)
           throw new WebhookError('INVALID_LINE_EVENTS', 400);
         const key = `${account}:${e.webhookEventId}`;
+        packetEventIds.add(e.webhookEventId);
         if (known.has(key)) { duplicates++; continue; }
         known.add(key);
         const src = e.source;
@@ -265,7 +269,7 @@ export class MultiWebhook {
           ...(typeof msg?.id === 'string' && /^[0-9]{1,64}$/.test(msg.id) ? {message_id:msg.id} : {}),
           ...(msg?.type === 'text' && typeof msg.text === 'string' ? {text: retainedText} : {}),
           ...(typeof src?.type === 'string' ? {source_type:src.type.slice(0,32)} : {}),
-          ...(typeof src?.userId === 'string' ? {user_id:src.userId.slice(0,128)} : {}),
+          ...(typeof src?.userId === 'string' && DEST.test(src.userId) ? {user_id:src.userId} : {}),
           ...(typeof src?.groupId === 'string' ? {group_id:src.groupId.slice(0,128)} : {}),
           ...(typeof src?.roomId === 'string' ? {room_id:src.roomId.slice(0,128)} : {}),
           ...(typeof e.timestamp === 'number' && Number.isSafeInteger(e.timestamp) ? {timestamp:e.timestamp} : {}),
@@ -293,17 +297,23 @@ export class MultiWebhook {
         this.settings = nextSettings;
       }
       // Durable enqueue before returning 2xx. Bounded inbox stores last 2000.
+      const enqueueResult = accepted ? this.enqueue?.(fresh) : undefined;
       if (accepted) {
         // Bridge commits first. If the inbox write then fails, LINE can retry:
         // the bridge's durable event IDs prevent a second enqueue/send.
-        this.enqueue?.(fresh);
         next.events = next.events.slice(-MAX_INBOX);
         await atomicWriteJson(join(this.dataDir, 'webhook-inbox.json'), next, 0o600);
         this.inbox = next;
       }
       if (settings.forwardUrl) {
         const isAdmitted = this.options?.isAdmitted ?? (() => false);
-        const admittedSet = new Set(fresh.filter(e => isAdmitted(e)).map(e => e.webhook_event_id));
+        // A bridge may classify a batch with transaction-local followup activity.
+        // Reuse that committed classification so forwarding cannot disagree with queueing.
+        const admittedSet = enqueueResult instanceof Set
+          ? new Set([...enqueueResult].filter(id => fresh.some(event => event.webhook_event_id === id)))
+          : new Set(fresh.filter(event => isAdmitted(event)).map(event => event.webhook_event_id));
+        // Inbox eviction can make a durable bridge-owned event appear fresh.
+        for (const id of packetEventIds) if (this.options?.ownsEvent?.(account, id)) admittedSet.add(id);
         const forwarder = this.options?.forwarder ?? defaultForwardWebhook;
         if (admittedSet.size === 0) {
           const fw = await forwarder(settings.forwardUrl, rawBody, {

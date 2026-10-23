@@ -14,9 +14,65 @@ const WHO = /^[a-z0-9_-]{1,32}$/;
 const MAX_IMAGE = 10 * 1024 * 1024;
 const MAX_BODY = 32 * 1024 * 1024;
 const MAX_PENDING = 1000;
+export const VALID_FAMILY_ADMISSIONS = [
+  'self-mention-group-text',
+  'keyword-prefix',
+  'followup-window',
+  'keyword-or-followup',
+  'smart-intent'
+] as const;
+export type FamilyAdmission = typeof VALID_FAMILY_ADMISSIONS[number];
+export type Admission = 'legacy' | FamilyAdmission;
+
+export function isFamilyKeywordTrigger(text: unknown): boolean {
+  if (typeof text !== 'string') return false;
+  const t = text.trim();
+  if (!t) return false;
+  return /^(?:喵喵?|助理喵|小貓|貓咪|請問|問一下|@自動回覆喵|@助理喵)(?:[，,：:\s\s+]|$)/i.test(t) ||
+         /^(?:喵喵?|助理喵|小貓|貓咪)$/i.test(t);
+}
+
+export function isSmartIntentTrigger(text: unknown): boolean {
+  if (typeof text !== 'string') return false;
+  const t = text.trim();
+  if (t.length < 3 || t.length > 500) return false;
+  const hasQuestionMark = /[？?]/.test(t);
+  const hasInquiryKeywords = /(?:幾點|什麼時候|哪裡|多少錢|推薦|怎麼辦|如何|請教|有沒有|是不是|能不能|可以嗎|幫我|查一下|有人知道|誰知道)/.test(t);
+  return hasQuestionMark && hasInquiryKeywords;
+}
+
+export function isFamilyEventAdmitted(event: ReceivedEvent, policy: {
+  account: string;
+  groups: ReadonlySet<string>;
+  destination: string;
+  admission: FamilyAdmission;
+  isWithinFollowup?: (event: ReceivedEvent) => boolean;
+}): boolean {
+  if (event.account !== policy.account || event.source_type !== 'group' || !event.group_id || !policy.groups.has(event.group_id) || event.message_type !== 'text' || !event.text) return false;
+  if (familyMentionAdmitted(event, { account: policy.account, groups: policy.groups, destination: policy.destination })) {
+    return true;
+  }
+  if (policy.admission === 'self-mention-group-text') {
+    return false;
+  }
+  if (policy.admission === 'keyword-prefix') {
+    return isFamilyKeywordTrigger(event.text);
+  }
+  if (policy.admission === 'followup-window') {
+    return policy.isWithinFollowup?.(event) ?? false;
+  }
+  if (policy.admission === 'keyword-or-followup') {
+    return isFamilyKeywordTrigger(event.text) || (policy.isWithinFollowup?.(event) ?? false);
+  }
+  if (policy.admission === 'smart-intent') {
+    return isFamilyKeywordTrigger(event.text) || (policy.isWithinFollowup?.(event) ?? false) || isSmartIntentTrigger(event.text);
+  }
+  return false;
+}
+
 type Route = { source_type: 'user' | 'group' | 'room'; source_id: string; who: string };
 type EndpointOverride = { mode:'override'; url:string; token:string; agent:string; timeout_seconds:number; protocol:'legacy-responses'|'family-text-v1' };
-type AccountConfig = { enabled: boolean; channel_access_token: string; routes: Route[]; endpoint?: EndpointOverride; admission?: 'legacy'|'self-mention-group-text'; expected_destination?: string };
+type AccountConfig = { enabled: boolean; channel_access_token: string; routes: Route[]; endpoint?: EndpointOverride; admission?: Admission; expected_destination?: string };
 type Config = { url: string; token: string; agent: string; timeout_seconds: number; accounts: Record<string, AccountConfig> };
 type Output = { type: 'text'; text: string } | { type: 'image'; data: string; mime: 'image/jpeg' | 'image/png' };
 type Job = { id: string; account: string; lane: string; who: string; event: ReceivedEvent; input_image?: string;
@@ -24,7 +80,7 @@ type Job = { id: string; account: string; lane: string; who: string; event: Rece
   outputs: Output[]; total?: number; next: number; attempts: number; due: number; error: string | null; created: number;
   /** Endpoint as accepted time. The token is deliberately absent from the job row:
    * it lives only in credential_revisions, addressed by credential_revision. */
-  snapshot?: Omit<EndpointSnapshot,'token'> & {version:1; admission:'legacy'|'self-mention-group-text';session_policy:'legacy-lane-v1'|'family-group-v1';session_key:string;expected_destination?:string}; credential_revision?: number; media_credential_revision?:number; recipient?: string };
+  snapshot?: Omit<EndpointSnapshot,'token'> & {version:1; admission:Admission;session_policy:'legacy-lane-v1'|'family-group-v1';session_key:string;expected_destination?:string}; credential_revision?: number; media_credential_revision?:number; recipient?: string };
 type Sender = { send(who: string, text: string, expectedTarget?: string): Promise<SendResult>;
   sendImage(who: string, image: Buffer, mime: 'image/jpeg' | 'image/png', expectedTarget?: string): Promise<SendResult> };
 type Dependencies = { sender(account: string): Sender | undefined; hasAlias(account: string, who: string): boolean; resolveAlias?(account: string, who: string): string | undefined;
@@ -53,7 +109,7 @@ function checkUrl(value: unknown): string {
 export type EndpointSnapshot = {url:string;token:string;agent:string;timeout_seconds:number;protocol:'legacy-responses'|'family-text-v1'};
 export function effectiveEndpoint(global: {url:string;token:string;agent:string;timeout_seconds:number}, account: {endpoint?: EndpointOverride;admission?:string}): EndpointSnapshot {
   if (account.endpoint) { const {mode, ...snapshot}=account.endpoint; return snapshot; }
-  if (account.admission === 'self-mention-group-text') fail('FAMILY_ENDPOINT_SNAPSHOT_REQUIRED');
+  if (account.admission && VALID_FAMILY_ADMISSIONS.includes(account.admission as any)) fail('FAMILY_ENDPOINT_SNAPSHOT_REQUIRED');
   if (!global.url || !global.token) fail('OPENCLAW_CONFIGURATION_REQUIRED');
   return {...global,protocol:'legacy-responses'};
 }
@@ -168,8 +224,12 @@ export function storedSnapshotValid(value:unknown):boolean {
     if(typeof job.account!=='string'||typeof job.who!=='string'||!NAME.test(job.account)||!WHO.test(job.who)||sourceKey(job.event)!==job.lane||job.event.account!==job.account||typeof job.recipient!=='string'||!job.recipient)return false;
     if(x.session_key!==snapshotSessionKey(job.account,job.lane,job.event.group_id))return false;
     if(family) {
-      if(x.protocol!=='family-text-v1'||x.agent!=='family-line'||x.admission!=='self-mention-group-text'||x.session_policy!=='family-group-v1'||!/^C[0-9a-f]{32}$/i.test(job.event.group_id??'')||job.event.destination!==x.expected_destination)return false;
-      if(!familyMentionAdmitted(job.event,{account:'family',groups:new Set([job.event.group_id!]),destination:x.expected_destination??''}))return false;
+      if(x.protocol!=='family-text-v1'||x.agent!=='family-line'||!VALID_FAMILY_ADMISSIONS.includes(x.admission as any)||x.session_policy!=='family-group-v1'||!/^C[0-9a-f]{32}$/i.test(job.event.group_id??'')||job.event.destination!==x.expected_destination)return false;
+      if(x.admission==='self-mention-group-text') {
+        if(!familyMentionAdmitted(job.event,{account:'family',groups:new Set([job.event.group_id!]),destination:x.expected_destination??''}))return false;
+      } else {
+        if(typeof job.event.text!=='string'||!job.event.text.trim())return false;
+      }
       if(job.outputs.some(p=>!object(p)||p.type!=='text'||typeof p.text!=='string'||!p.text.trim()||p.text.length>5000||p.text.includes('\0')))return false;
     } else if(x.protocol!=='legacy-responses'||x.admission!=='legacy'||x.session_policy!=='legacy-lane-v1')return false;
     return true;
@@ -177,6 +237,7 @@ export function storedSnapshotValid(value:unknown):boolean {
 
 export class OpenClawBridge {
   private db!: DatabaseSync;
+  private dbOpened = false;
   private config: Config = defaults();
   private timer?: ReturnType<typeof setInterval>;
   private task?: Promise<void>;
@@ -185,6 +246,26 @@ export class OpenClawBridge {
   private abort = new AbortController();
   private readonly fetcher: typeof fetch;
   private readonly now: () => number;
+  private lastActivity = new Map<string, number>();
+
+  private followupActivityKey(event: ReceivedEvent): string | undefined {
+    if (event.source_type !== 'group' || !event.group_id || !/^U[0-9a-f]{32}$/i.test(event.user_id ?? '')) return undefined;
+    return `${event.account}\0${event.group_id}\0${event.user_id}`;
+  }
+
+  private touchGroupActivity(event: ReceivedEvent): void {
+    const key = this.followupActivityKey(event);
+    if (key) this.lastActivity.set(key, this.now());
+  }
+
+  private isWithinFollowupWindow(event: ReceivedEvent, windowMs = 180_000): boolean {
+    const key = this.followupActivityKey(event);
+    if (!key) return false;
+    const last = this.lastActivity.get(key);
+    if (last === undefined) return false;
+    const elapsed = this.now() - last;
+    return elapsed >= 0 && elapsed < windowMs;
+  }
   private fault: string | null = null;
   private stopped?: Promise<void>;
   constructor(private readonly root: string, private readonly deps: Dependencies) {
@@ -194,6 +275,7 @@ export class OpenClawBridge {
     await ensurePrivateDir(this.root);
     const path = bridgeDatabasePath(this.root);
     this.db = new DatabaseSync(path);
+    this.dbOpened = true;
     await chmod(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
@@ -224,11 +306,11 @@ export class OpenClawBridge {
           !Array.isArray(cfg.routes) || cfg.routes.length > 100) return fail('INVALID_OPENCLAW_SETTINGS');
       const endpoint=this.validateOverride(cfg.endpoint);
       const admission=cfg.admission === undefined ? 'legacy' : cfg.admission;
-      if (!['legacy','self-mention-group-text'].includes(admission as string)) return fail('INVALID_OPENCLAW_ADMISSION');
+      if (!['legacy', ...VALID_FAMILY_ADMISSIONS].includes(admission as string)) return fail('INVALID_OPENCLAW_ADMISSION');
       if (cfg.expected_destination!==undefined && (typeof cfg.expected_destination!=='string'||!/^U[0-9a-f]{32}$/i.test(cfg.expected_destination)) && cfg.expected_destination!=='') fail('FAMILY_DESTINATION_REQUIRED');
       if (id==='family' && cfg.enabled && !/^U[0-9a-f]{32}$/i.test(String(cfg.expected_destination??''))) fail('FAMILY_DESTINATION_REQUIRED');
       if(id==='family'&&cfg.enabled&&this.deps.boundDestination?.(id)!==cfg.expected_destination)fail('FAMILY_SIGNED_BINDING_REQUIRED',409);
-      if (id==='family' && cfg.enabled && (!endpoint || endpoint.agent!=='family-line' || endpoint.protocol!=='family-text-v1' || admission!=='self-mention-group-text')) return fail('FAMILY_CONFIGURATION_REQUIRED');
+      if (id==='family' && cfg.enabled && (!endpoint || endpoint.agent!=='family-line' || endpoint.protocol!=='family-text-v1' || !VALID_FAMILY_ADMISSIONS.includes(admission as any))) return fail('FAMILY_CONFIGURATION_REQUIRED');
       const seen = new Set<string>();
       for (const route of cfg.routes) {
         if (!object(route) || !['user','group','room'].includes(String(route.source_type)) || typeof route.source_id !== 'string' ||
@@ -263,7 +345,7 @@ export class OpenClawBridge {
         channel_access_token: patch.channel_access_token === undefined ? old.channel_access_token : patch.channel_access_token as string,
         routes: patch.routes === undefined ? old.routes : patch.routes as Route[],
         endpoint: mergedEndpoint(old.endpoint, patch.endpoint),
-        admission: patch.admission === undefined ? old.admission : patch.admission as 'legacy'|'self-mention-group-text',
+        admission: patch.admission === undefined ? old.admission : patch.admission as Admission,
         expected_destination:patch.expected_destination===undefined?old.expected_destination:patch.expected_destination as string};
     } else {
       for (const key of ['url','token','agent','timeout_seconds'] as const) {
@@ -291,6 +373,11 @@ export class OpenClawBridge {
   hasOutstanding(account: string, who?:string): boolean {
     return this.jobs().some(j=>j.account===account && (who===undefined||j.who===who) && !['submitted','ignored'].includes(j.state));
   }
+  ownsEvent(account: string, webhookEventId: string): boolean {
+    if (!NAME.test(account) || !/^[A-Za-z0-9_-]{8,128}$/.test(webhookEventId)) return false;
+    const id = createHash('sha256').update(`${account}\0${webhookEventId}`).digest('hex');
+    return !!this.db.prepare('SELECT id FROM jobs WHERE id=?').get(id);
+  }
   removeAccount(account: string): void {
     if (this.task || this.hasOutstanding(account)) return fail('OPENCLAW_JOBS_PENDING',409);
     const next = structuredClone(this.config); delete next.accounts[account];
@@ -298,28 +385,44 @@ export class OpenClawBridge {
     this.config=next;
     this.db.prepare('DELETE FROM jobs WHERE account=?').run(account);
   }
-  isAdmitted(event: ReceivedEvent): boolean {
+  isAdmitted(event: ReceivedEvent, isWithinFollowup?: (event: ReceivedEvent) => boolean): boolean {
     const cfg = this.config.accounts[event.account], lane = sourceKey(event);
     if (!cfg?.enabled || !lane || event.type !== 'message' || !['text', 'image'].includes(event.message_type ?? '')) return false;
     if (event.account === 'family') {
       if (!cfg.expected_destination || event.destination !== cfg.expected_destination || this.deps.boundDestination?.(event.account) !== cfg.expected_destination) return false;
-      if (cfg.admission === 'self-mention-group-text' && !familyMentionAdmitted(event, { account: event.account, groups: groupWhitelist(cfg), destination: cfg.expected_destination ?? '' })) return false;
+      const admission = (cfg.admission ?? 'self-mention-group-text') as FamilyAdmission;
+      const admitted = isFamilyEventAdmitted(event, {
+        account: event.account,
+        groups: groupWhitelist(cfg),
+        destination: cfg.expected_destination,
+        admission,
+        isWithinFollowup: candidate => isWithinFollowup?.(candidate) ?? this.isWithinFollowupWindow(candidate)
+      });
+      if (!admitted) return false;
     }
     const route = cfg.routes.find(r => `${r.source_type}:${r.source_id}` === lane);
     return !!route;
   }
   /** Called before the webhook returns 200, including redeliveries. A full queue
    * refuses the entire batch. Already submitted IDs are retained for deduplication. */
-  enqueue(events: ReceivedEvent[]): void {
+  enqueue(events: ReceivedEvent[]): Set<string> {
+    const admitted = new Set<string>();
+    const committedActivity: ReceivedEvent[] = [];
+    const batchActivity = new Set<string>();
+    const isWithinBatchFollowup = (event: ReceivedEvent): boolean => {
+      const key = this.followupActivityKey(event);
+      return (key !== undefined && batchActivity.has(key)) || this.isWithinFollowupWindow(event);
+    };
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const all=this.jobs();
       let pending=all.filter(j=>!['submitted','ignored'].includes(j.state)).length;
       for (const event of events) {
-        if (!this.isAdmitted(event)) continue;
+        if (!this.isAdmitted(event, isWithinBatchFollowup)) continue;
         const cfg=this.config.accounts[event.account]!, lane=sourceKey(event)!;
         const route=cfg.routes.find(r=>`${r.source_type}:${r.source_id}`===lane)!;
         const id=createHash('sha256').update(`${event.account}\0${event.webhook_event_id}`).digest('hex');
+        admitted.add(event.webhook_event_id);
         if (this.db.prepare('SELECT id FROM jobs WHERE id=?').get(id)) continue;
         if (++pending>MAX_PENDING) return fail('OPENCLAW_QUEUE_FULL',503);
         const endpoint=effectiveEndpoint(this.config,cfg);
@@ -330,12 +433,19 @@ export class OpenClawBridge {
         const snapshot:NonNullable<Job['snapshot']>={version:1,url:endpoint.url,agent:endpoint.agent,timeout_seconds:endpoint.timeout_seconds,protocol:endpoint.protocol,admission:cfg.admission??'legacy',session_policy:family?'family-group-v1':'legacy-lane-v1',session_key:this.sessionKey(event.account,lane,event.group_id),...(family?{expected_destination:cfg.expected_destination}:{})};
         const mediaRevision=event.message_type==='image'&&cfg.channel_access_token ? Number(this.db.prepare('INSERT INTO credential_revisions(value,created) VALUES(?,?)').run(cfg.channel_access_token,this.now()).lastInsertRowid):undefined;
         this.save({id,account:event.account,lane,who:route.who,...(recipient ? {recipient} : {}),event,snapshot,credential_revision:Number(revision.lastInsertRowid),...(mediaRevision?{media_credential_revision:mediaRevision}:{}),state:'pending',outputs:[],next:0,attempts:0,due:0,error:null,created:this.now()});
+        if (event.account === 'family') {
+          committedActivity.push(event);
+          const key = this.followupActivityKey(event);
+          if (key) batchActivity.add(key);
+        }
       }
       // Never prune pending/failed/uncertain work. Completion retention is bounded.
       const complete=this.jobs().filter(j=>['submitted','ignored'].includes(j.state));
       for (const job of complete.filter((j,i)=>j.created < this.now()-30*86400_000 || i<complete.length-4000))
         this.db.prepare('DELETE FROM jobs WHERE id=?').run(job.id);
       this.db.exec('COMMIT');
+      for (const event of committedActivity) this.touchGroupActivity(event);
+      return admitted;
     } catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }
   review(id: string, action: 'retry' | 'skip' | 'mark_submitted'): void {
@@ -483,6 +593,9 @@ export class OpenClawBridge {
         return;
       }
       job.next++;job.state=job.next===job.outputs.length?'submitted':'ready';job.attempts=0;job.error=null;this.save(job);
+      if (job.account === 'family' && job.state === 'submitted' && job.event.group_id) {
+        this.touchGroupActivity(job.event);
+      }
     }
   }
   private checkCapacity(extra: number): void {
@@ -511,7 +624,13 @@ export class OpenClawBridge {
   stop(): Promise<void> {
     if(this.stopped)return this.stopped;
     this.stopping=true;if(this.timer)clearInterval(this.timer);this.abort.abort();
-    this.stopped=(async()=>{await Promise.all([this.task?.catch(()=>undefined),this.mediaTask?.catch(()=>undefined)]);this.db.close();})();
+    this.stopped=(async()=>{
+      await Promise.all([this.task?.catch(()=>undefined),this.mediaTask?.catch(()=>undefined)]);
+      if(this.dbOpened){
+        this.dbOpened=false;
+        this.db.close();
+      }
+    })();
     return this.stopped;
   }
 }

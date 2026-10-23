@@ -16,6 +16,7 @@ import { trustedIngress, ingressPath, ingressMutationAllowed } from './ingress.j
 import { parseRequestId, requestFingerprint, RequestDeduplicator, sendResponse } from './api-v1.js';
 import { MultiWebhook, WebhookError } from './webhook.js';
 import { OpenClawBridge, BridgeError } from './openclaw.js';
+import { formatStartupFailure, type StartupPhase } from './startup-observability.js';
 
 const NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAX_ACCOUNTS = 20;
@@ -63,20 +64,25 @@ async function jsonBody(req: IncomingMessage): Promise<Record<string,unknown>> {
   return data as Record<string,unknown>;
 }
 
-export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressTrust?: typeof trustedIngress } = {}) {
+export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressTrust?: typeof trustedIngress; onStartupPhase?: (phase: StartupPhase) => void } = {}) {
+  const phase = (value: StartupPhase) => options.onStartupPhase?.(value);
+  phase('webhook');
   const {rootDir} = multiDataPaths(dataDir);
   const accountDir = join(rootDir,'accounts');
   const registryPath = join(rootDir,'accounts.json');
   let bridge: OpenClawBridge | undefined;
   const webhook = new MultiWebhook(rootDir, events => bridge?.enqueue(events), {
-    isAdmitted: event => bridge?.isAdmitted(event) ?? false
+    isAdmitted: event => bridge?.isAdmitted(event) ?? false,
+    ownsEvent: (account, webhookEventId) => bridge?.ownsEvent(account, webhookEventId) ?? false
   });
   await webhook.load();
+  phase('registry');
   await ensurePrivateDir(rootDir);
   await ensurePrivateDir(accountDir);
   const loaded = await readJsonSafe<Registry>(registryPath,{version:1,accounts:[]},validRegistry);
   if (loaded.warning) throw new Error('MULTI_ACCOUNT_REGISTRY_CORRUPT_RESTORE_BACKUP');
   let registry: Registry = loaded.value;
+  phase('control');
   const { config: controlConfig } = await loadConfig(join(rootDir,'control'));
   const control = await createGateway({dataDir:join(rootDir,'control'), ingressTrust:options.ingressTrust});
   const running = new Map<string, Gateway>();
@@ -104,6 +110,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
     instance.startEmbedded();
     return instance;
   }
+  phase('accounts');
   try {
     for (const {id} of registry.accounts) {
       running.set(id,await loadAccount(id));
@@ -114,6 +121,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
     await control.stop();
     throw e;
   }
+  phase('bridge');
   bridge = new OpenClawBridge(rootDir,{
     sender:account=>running.get(account)?.sender,
     boundDestination:account=>webhook.boundDestination(account),
@@ -121,7 +129,12 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
     resolveAlias:(account,who)=>running.get(account)?.contacts.resolve(who)?.chatId
   });
   try { await bridge.load(); }
-  catch(e) { for(const gw of running.values())await gw.stop();await control.stop();throw e; }
+  catch(e) {
+    try { await bridge.stop(); } catch {}
+    for(const gw of running.values()) { try { await gw.stop(); } catch {} }
+    try { await control.stop(); } catch {}
+    throw e;
+  }
   const openclaw=bridge;
 
   async function addAccount(id: string): Promise<void> {
@@ -365,8 +378,15 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
         s.once('error',reject);
         s.listen(port,host,()=>{s.off('error',reject);resolve();});
       });
-      try {await listen(apiServer,apiPort);await listen(uiServer,uiPort);}
-      catch(e){await this.stop();throw e;}
+      try {
+        phase('api-listen');
+        await listen(apiServer,apiPort);
+        phase('ui-listen');
+        await listen(uiServer,uiPort);
+      } catch(e) {
+        try { await this.stop(); } catch {}
+        throw e;
+      }
       control.discovery?.start();
       openclaw.start();
     },
@@ -389,14 +409,15 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
 
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
   process.umask(0o077);
+  let phase: StartupPhase = 'webhook';
   try{
-    const gw=await createMultiGateway();
+    const gw=await createMultiGateway(DATA_DIR,{onStartupPhase:value=>{phase=value;}});
     for(const signal of ['SIGINT','SIGTERM'] as const){
       process.once(signal,()=>{void gw.stop().then(()=>process.exit(0),()=>process.exit(1));});
     }
     await gw.start();
-  }catch{
-    process.stderr.write('LINE OA Multi startup failed; inspect protected Add-on logs and backup.\n');
+  }catch(error){
+    process.stderr.write(formatStartupFailure(phase,error));
     process.exitCode=1;
   }
 }

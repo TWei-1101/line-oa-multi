@@ -150,8 +150,15 @@ async function openAccountBridge(id){
     const endpointAgent=field(parent,'固定 Agent','text',cfg.endpoint?.agent||'family-line');
     const endpointTimeout=field(parent,'Family 等待秒數','number',String(cfg.endpoint?.timeout_seconds||30));
     const protocol=document.createElement('select');const proto=label('option','family-text-v1');proto.value='family-text-v1';protocol.append(proto);parent.append(label('label','Family Protocol'),protocol);
-    const admission=document.createElement('select');for(const [v,t] of [['legacy','一般模式（不可啟用 Family）'],['self-mention-group-text','僅群組 @Bot 文字']]){const o=label('option',t);o.value=v;admission.append(o);}admission.value=cfg.admission||'legacy';parent.append(label('label','Family Admission'),admission);
-    parent.append(label('p','只會送出群組中的已驗證 @Bot 文字。完成安全傳輸、群組映射與部署驗證前請保持停用。'));
+    const admission=document.createElement('select');for(const [v,t] of [
+      ['legacy','一般模式（不可啟用 Family）'],
+      ['self-mention-group-text','僅群組 @Bot 文字（預設）'],
+      ['keyword-prefix','文字喚醒詞（喵／助理喵／小貓等開頭）'],
+      ['followup-window','追問窗口（@Bot 後 3 分鐘免 Tag）'],
+      ['keyword-or-followup','喚醒詞 ＋ 追問窗口（最推薦 ⭐）'],
+      ['smart-intent','智慧意圖過濾（疑問句＋喚醒詞＋追問）']
+    ]){const o=label('option',t);o.value=v;admission.append(o);}admission.value=cfg.admission||'legacy';parent.append(label('label','Family Admission'),admission);
+    parent.append(label('p','支援：僅 @Bot 文字、文字開頭喚醒詞、對話延續免 Tag 追問，或智慧意圖過濾。可依家庭使用習慣隨時切換。'));
     familySave=()=>({expected_destination:expected.value.trim(),admission:admission.value,endpoint:override.checked?{mode:'override',url:endpointUrl.value.trim(),agent:endpointAgent.value.trim(),timeout_seconds:Number(endpointTimeout.value),protocol:'family-text-v1',...(endpointToken.value?{token:endpointToken.value}:{})}:{mode:'inherit'}});
   }
   saveBridge=()=>request('api/accounts/'+encodeURIComponent(id)+'/openclaw',{method:'PUT',body:JSON.stringify({...familySave(),enabled:enabled.checked,routes:[...rows.children].map(row=>row.readRoute()),...(clear.checked?{channel_access_token:''}:token.value?{channel_access_token:token.value}:{})})});
