@@ -1,3 +1,18 @@
+# 0.3.0-dev.4
+
+- **Family Admission 5 種通訊模式自由切換**：
+  - `self-mention-group-text`：僅群組 @Bot 文字（預設模式）。
+  - `keyword-prefix`：文字開頭喚醒詞（喵／助理喵／小貓等開頭，不需 @Bot）。
+  - `followup-window`：追問窗口模式（@Bot 觸發後 3 分鐘內同發話者免 Tag 連續追問）。
+  - `keyword-or-followup`：喚醒詞 ＋ 追問窗口複合模式（最推薦 ⭐）。
+  - `smart-intent`：智慧意圖過濾（以疑問句、查詢關鍵字結合喚醒詞與追問窗口）。
+- **群組按發話者隔離追問窗口（Per-sender Followup Window Isolation）**：
+  - 在同一 LINE 群組中，多位家庭成員連續發問時，追問 context 視窗依據發話者（User ID）獨立追蹤與隔離，徹底避免訊息覆蓋或上下文串線。
+- **啟動觀察診斷與故障健全機制（Safe Startup Diagnostics & DB Safety）**：
+  - 加裝防護代理與階段安全標籤，啟動異常時精準記錄 phase/code，並確保 SQLite 與網路監聽資源安全關閉，避免資源洩漏。
+- **Web UI 前端管理選單完善**：
+  - 更新 Web 介面（`web/multi.js`），在 Family Admission 設定中提供完整 5 種模式的視覺化下拉選單與即時說明。
+
 # 0.3.0-dev.1
 
 - 新增可選的 HA Webhook → Mac OpenClaw → OA Multi 文字／圖片橋接；每個帳號獨立啟用、來源綁定與 Token。

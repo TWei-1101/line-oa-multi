@@ -41,6 +41,22 @@ Signature verification uses original bytes and the account's secret. The first v
 
 Optional per-account automatic replies now use a separate durable queue: **LINE → HA Webhook → OpenClaw → OA Multi sender**. Configure the connection in the Add-on Web UI, then bind approved LINE sources to contact aliases. Incoming images use that account's Channel Access Token for download only; outgoing text/images use the existing QR-login OA Manager session, never the official push/reply send APIs. Long replies are split without truncation. Uncertain sends require review instead of blind retry. No HA YAML automation or modification of OpenClaw's LINE plugin is needed.
 
+### Family Admission Modes
+
+In the Add-on Web UI under account OpenClaw settings, **Family Admission** supports 5 flexible interaction modes:
+
+| Mode | Key | Description |
+|---|---|---|
+| **僅群組 @Bot 文字** | `self-mention-group-text` | Default mode. Only processes messages in group chats that explicitly `@Bot`. |
+| **文字開頭喚醒詞** | `keyword-prefix` | Matches custom wake words at start of line (e.g. `喵`, `助理喵`, `小貓`), no `@Bot` required. |
+| **追問窗口模式** | `followup-window` | Once triggered by `@Bot`, the sender can ask continuous follow-up questions within 3 minutes without tagging the bot again. |
+| **喚醒詞 ＋ 追問窗口** | `keyword-or-followup` | **Recommended ⭐**. Combines wake words and follow-up window for natural conversational experience. |
+| **智慧意圖過濾** | `smart-intent` | Intelligently evaluates questions, inquiries, and wake words within the group to route AI-intended questions. |
+
+### Per-Sender Followup Isolation
+
+In group chats with multiple members, follow-up windows are isolated strictly per sender ID (`userId`). When multiple users chat in the same group, their context windows never overwrite or leak across participants.
+
 See [繁體中文安裝步驟](docs/OPENCLAW-zh-TW.md) or [Mac setup and recovery](docs/OPENCLAW.md), including the supplied Mac image adapter and optional automatic startup. This new bridge's actual Mac/HAOS end-to-end behavior remains **pending device validation**.
 
 Use a test HA instance and test recipients. The sender uses LINE's unofficial management interface; a successful HTTP submission is not independent proof of recipient delivery. Restart persistence, backup/restore, long-running stability and LINE Developers Webhook verification remain acceptance tests.

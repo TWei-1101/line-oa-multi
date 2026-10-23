@@ -8,4 +8,9 @@
 
 **本 Add-on 必須搭配 [LINE OA HACS 整合](https://github.com/xangin/line-oa-hacs)使用。** HACS 安裝、配對、Actions 與自動化細節，請直接參閱 [HACS repo 的說明](https://github.com/xangin/line-oa-hacs#readme)。
 
+### 💡 0.3.0-dev.4 新增亮點
+- **Family Admission 5 種通訊模式**：支援「僅群組 @Bot 文字」、「文字喚醒詞」、「追問窗口（3 分鐘免 Tag）」、「喚醒詞 ＋ 追問窗口」及「智慧意圖過濾」，可於 Web UI 中自由切換。
+- **群組按發話者隔離追問窗口**：群組中多位成員同時發問時，追問 context 依據發話者精確隔離，互不干擾。
+- **啟動診斷與防護**：強化容器啟動失敗日誌、安全階段識別與資料庫保護。
+
 沒有對外開放 TCP 埠。備份保留必要設定與登入資料，還原時從公開 GHCR 下載對應版本映像。
