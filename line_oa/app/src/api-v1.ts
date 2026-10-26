@@ -88,7 +88,7 @@ export function sendResponse(requestId: string, result: SendResult): ApiSendResp
   };
 }
 
-interface RequestEntry<T> { fingerprint: string; expires: number; promise: Promise<T> }
+interface RequestEntry<T> { fingerprint: string; expires: number; pending: boolean; promise: Promise<T> }
 
 export class RequestDeduplicator<T> {
   private entries = new Map<string, RequestEntry<T>>();
@@ -101,14 +101,21 @@ export class RequestDeduplicator<T> {
       if (existing.fingerprint !== fingerprint) throw new Error('REQUEST_ID_CONFLICT');
       return { value: await existing.promise, duplicate: true };
     }
-    while (this.entries.size >= this.maxEntries) this.entries.delete(this.entries.keys().next().value as string);
-    const promise = action();
-    this.entries.set(requestId, { fingerprint, expires: Date.now() + this.ttlMs, promise });
+    if (this.entries.size >= this.maxEntries) {
+      const settled = [...this.entries].find(([, entry]) => !entry.pending);
+      if (!settled) throw new Error('REQUEST_CACHE_FULL');
+      this.entries.delete(settled[0]);
+    }
+    const entry: RequestEntry<T> = { fingerprint, expires: Infinity, pending: true, promise: Promise.resolve().then(action) };
+    const finish = () => { entry.pending = false; entry.expires = Date.now() + this.ttlMs; };
+    entry.promise.then(finish, finish);
+    this.entries.set(requestId, entry);
+    const promise = entry.promise;
     return { value: await promise, duplicate: false };
   }
 
   private prune(): void {
     const now = Date.now();
-    for (const [key, value] of this.entries) if (value.expires <= now) this.entries.delete(key);
+    for (const [key, value] of this.entries) if (!value.pending && value.expires <= now) this.entries.delete(key);
   }
 }

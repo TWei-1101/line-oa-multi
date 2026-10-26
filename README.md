@@ -2,12 +2,14 @@
 
 This repository integrates the complete MIT-licensed xangin LINE OA Add-on and HACS sources with multi-account and Webhook support. It continues the original project rather than rewriting it. Two live accounts have been verified for QR login and message sending on HAOS; Webhook, backup/restore and long-running production use remain pending real-device validation.
 
-- Add-on upstream: `xangin/line-oa-ha-addon` at `afb9fe582013a50324a8aa9f7e04cfd5d2338000`.
+- Add-on upstream: `xangin/line-oa-ha-addon` at `7ccb348e5b43a11171937e528f0d8ce973bf7ff8` (`v0.1.10`).
 - HACS upstream: `xangin/line-oa-hacs` at `977980f149e8fc0d4a9f5ccaed3a1455b8c1b904`.
 - Original prototype retained under `prototype/`; its fixture tests are not deployment verification.
 - Upstream LICENSE is retained. Historical upstream docs and workflows are references; the installation guide below takes precedence.
 
 One Add-on manages up to 20 accounts. Each has its own LINE session, cookie jar, contacts, sender and data directory. Gateway API authentication and HA pairing are shared. Explicit `account` is required on HA send actions; account IDs use lowercase letters, digits, underscores and hyphens, starting with a letter (1–32 chars).
+
+Each account now uses the upstream `v0.1.10` shared text/image FIFO. Up to 32 active or waiting sends and 20 MiB are retained in memory per account; a queued request that waits more than 10 seconds is rejected as known-unsent. The obsolete local five-messages-per-minute limit is migrated to unlimited, while LINE's own limits and duplicate protection remain enforced.
 
 ```yaml
 action: line_oa.send_text

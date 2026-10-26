@@ -2,7 +2,9 @@
 
 ## 自動測試
 
-0.1.9 包含 78 項 Mock 測試，已在本機 Node.js 26 通過 TypeScript strict 與完整測試。Node.js 24 的 amd64／aarch64 原生建置與 smoke 結果以對應提交的 [GitHub Actions](https://github.com/xangin/line-oa-ha-addon/actions) 紀錄為準。測試涵蓋：
+上游 0.1.10 新增文字／圖片 FIFO、等待中的重複 request ID、容量與等待上限、斷線取消、停止服務、帳號／別名變更，以及舊版每分鐘 5 則設定遷移與超過 5 筆的 API 併發發送測試。本 fork 另驗證每帳號獨立佇列與 OpenClaw 收件人快照相容性。
+
+0.1.10 包含 90 項上游 Mock 測試；Node.js 24 的 amd64／aarch64 原生建置與 smoke 結果以對應提交的 [GitHub Actions](https://github.com/xangin/line-oa-ha-addon/actions) 紀錄為準。測試涵蓋：
 
 - 探索、短效配對、過期／錯誤／已用秘密、互斥、撤銷與損壞資料拒絕。
 - Ingress 來源、相對靜態資源、CSRF／Origin、Web Session 與 LINE 登出。

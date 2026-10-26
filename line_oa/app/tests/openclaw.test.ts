@@ -92,11 +92,12 @@ test('uncertain send pauses only its conversation and manual review resumes from
   }finally{await f.close();}
 });
 
-test('explicit preflight busy and rate limits retry without regenerating the answer; failed jobs are retained',async()=>{
+test('explicit queue and busy preflight failures retry without regenerating the answer; failed jobs are retained',async()=>{
   let generations=0;const f=await fixture(async()=>{generations++;return Response.json(answer('answer'));});
-  let sends=0;f.sender.send=async()=>{sends++;if(sends===1)throw new Error('SEND_BUSY');return ok();};
+  let sends=0;f.sender.send=async()=>{sends++;if(sends===1)throw new Error('SEND_QUEUE_TIMEOUT');if(sends===2)throw new Error('SEND_BUSY');return ok();};
   try{f.bridge.enqueue([event()]);await f.bridge.tick();assert.equal(f.bridge.status().counts.ready,1);
-    f.advance();await f.restart();await f.bridge.tick();assert.equal(generations,1);assert.equal(sends,2);
+    f.advance();await f.restart();await f.bridge.tick();assert.equal(f.bridge.status().counts.ready,1);
+    f.advance();await f.restart();await f.bridge.tick();assert.equal(generations,1);assert.equal(sends,3);
     f.sender.send=async()=>({result:'FAILED',sendId:'bad',status:403,error:'CSRF'});
     f.bridge.enqueue([event('event-000002')]);await f.bridge.tick();assert.equal(f.bridge.status().counts.failed,1);
     await assert.rejects(async()=>f.bridge.removeAccount('aiassistant'),/OPENCLAW_JOBS_PENDING/);

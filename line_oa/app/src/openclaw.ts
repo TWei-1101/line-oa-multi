@@ -579,10 +579,11 @@ export class OpenClawBridge {
       } catch(e) {
         // The existing sender throws its preflight errors before issuing a send.
         const code=e instanceof Error?e.message:'';
-        if (['SEND_BUSY','RATE_LIMITED','DUPLICATE_BLOCKED','SESSION_NETWORK'].includes(code)) {
+        if (['SEND_BUSY','RATE_LIMITED','DUPLICATE_BLOCKED','SESSION_NETWORK'].includes(code) ||
+          code.startsWith('SEND_QUEUE_')) {
           job.state='ready';this.retry(job,code);return;
         }
-        job.state=/^(SESSION_|TARGET_|INVALID_|AUTH_)/.test(code)?'failed':'unknown';
+        job.state=/^(SESSION_|TARGET_|INVALID_|AUTH_|SEND_CONTEXT_CHANGED$)/.test(code)?'failed':'unknown';
         job.error=job.state==='unknown'?'SEND_RESULT_UNCERTAIN':'SEND_PREFLIGHT_FAILED';this.save(job);return;
       }
       if (result.result==='UNKNOWN') { job.state='unknown';job.error='SEND_RESULT_UNCERTAIN';this.save(job);return; }

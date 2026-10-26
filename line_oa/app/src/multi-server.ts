@@ -63,6 +63,15 @@ async function jsonBody(req: IncomingMessage): Promise<Record<string,unknown>> {
   if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error('INVALID_JSON');
   return data as Record<string,unknown>;
 }
+function requestSignal(req: IncomingMessage, res: ServerResponse): AbortSignal {
+  const controller = new AbortController();
+  const cancel = () => { if (!res.writableFinished) controller.abort(); };
+  req.once('aborted',cancel);
+  res.once('close',cancel);
+  res.once('finish',()=>{req.off('aborted',cancel);res.off('close',cancel);});
+  if(req.aborted || res.destroyed)controller.abort();
+  return controller.signal;
+}
 
 export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressTrust?: typeof trustedIngress; onStartupPhase?: (phase: StartupPhase) => void } = {}) {
   const phase = (value: StartupPhase) => options.onStartupPhase?.(value);
@@ -321,7 +330,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
       if(req.method==='GET'&&path==='/api/v1/status'&&!url.searchParams.has('account')){
         const states=accountStatus();
         const online=states.some(x=>x.logged_in);
-        return reply(res,200,{instance_id:controlConfig.instanceId,api_version:1,version:'0.3.0-dev.4',
+        return reply(res,200,{instance_id:controlConfig.instanceId,api_version:1,version:'0.3.0-dev.5',
           gateway_status:'running',line_logged_in:online,session_status:online?'ready':'auth_required',
           account_name:'LINE OA Multi',last_error:null,updated_at:new Date().toISOString(),
           accounts_count:states.length,accounts_connected:states.filter(x=>x.logged_in).length});
@@ -351,8 +360,9 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
         if(st==='AUTH_REQUIRED'||st==='EXPIRED')return error(res,st==='EXPIRED'?'SESSION_EXPIRED':'AUTH_REQUIRED',409);
         const requestId=parseRequestId(body.request_id);
         const fingerprint=requestFingerprint(['text',id,who,message]);
+        const signal=requestSignal(req,res);
         const result=await dedup.get(id)!.run(requestId,fingerprint,async()=>{
-          const sent=await gw.sender.send(who,message);
+          const sent=await gw.sender.send(who,message,signal);
           const response=sendResponse(requestId,sent);
           return {status: response.status==='confirmed'?200:response.status==='failed'?502:202,body:response};
         });
@@ -363,7 +373,10 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
       const code=e instanceof Error&&/^[A-Z][A-Z0-9_]{1,80}$/.test(e.message)?e.message:'INTERNAL_ERROR';
       if(e instanceof WebhookError)return error(res,e.code,e.status);
       if(e instanceof BridgeError)return error(res,e.code,e.status);
-      return error(res,code,code.startsWith('INVALID_')?400:code==='REQUEST_ID_CONFLICT'?409:500);
+      const status=code.startsWith('INVALID_')?400:
+        ['REQUEST_ID_CONFLICT','DUPLICATE_BLOCKED'].includes(code)?409:
+        code.startsWith('SEND_QUEUE_')||['SEND_CONTEXT_CHANGED','REQUEST_CACHE_FULL'].includes(code)?503:500;
+      return error(res,code,status);
     }
   });
   for(const server of [uiServer,apiServer]){

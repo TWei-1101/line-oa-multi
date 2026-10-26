@@ -1,5 +1,21 @@
 # Validation record — 2026-10-19
 
+## Upstream Add-on v0.1.10 sync — 2026-10-26
+
+- Ported the complete upstream delta from `afb9fe582013a50324a8aa9f7e04cfd5d2338000`
+  (v0.1.9) through `7ccb348e5b43a11171937e528f0d8ce973bf7ff8`
+  (v0.1.10), while retaining the fork's multi-account, OpenClaw, recipient-binding,
+  session and durable-job behavior.
+- Node 24.18.0 strict TypeScript build and the complete native suite pass locally:
+  174 passed / 0 failed with `TMPDIR=/private/tmp`. This includes the new bounded
+  per-account text/image FIFO, pending request-ID retention, disconnect cancellation,
+  safe shutdown, recipient-change protection and OpenClaw retry classification.
+- Backup exclusions and version metadata checks pass. The HACS sources were not
+  changed by this sync; their Ruff, mypy and pytest matrices are left to the remote
+  release gate because those tools are not installed in this local environment.
+- No live LINE message was sent and no running Home Assistant/OpenClaw configuration,
+  account, session or queue was modified during this source validation.
+
 ## OpenClaw bridge — 2026-10-21
 
 - Add-on `0.3.0-dev.1` adds optional per-account OpenClaw Responses bridging,

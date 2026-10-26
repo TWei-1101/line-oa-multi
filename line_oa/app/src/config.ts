@@ -13,7 +13,7 @@ export const DEFAULT_CONFIG: GatewayConfig = {
   uiAuthEnabled: false,
   apiEnabled: false,
   secureCookies: false,
-  rateLimitPerMinute: 5,
+  rateLimitPerMinute: 0,
   duplicateWindowMs: 60_000,
   maxImageBytes: 10 * 1024 * 1024,
   maxTempBytes: 20 * 1024 * 1024,
@@ -43,8 +43,10 @@ export async function loadConfig(dataDir = DATA_DIR): Promise<{ config: GatewayC
   config.port = 8787;
   config.apiEnabled = true;
   config.uiAuthEnabled = false;
+  const rateLimitChanged = config.rateLimitPerMinute !== 0;
+  config.rateLimitPerMinute = 0;
 
   if (config.port < 1024 || config.port > 65535) config.port = DEFAULT_CONFIG.port;
-  if (configChanged) await atomicWriteJson(path, config);
+  if (configChanged || rateLimitChanged) await atomicWriteJson(path, config);
   return { config, warning: loaded.warning };
 }
