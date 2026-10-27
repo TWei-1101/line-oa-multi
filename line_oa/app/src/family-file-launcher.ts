@@ -2,7 +2,7 @@
 import { constants, openSync, fstatSync, readFileSync, closeSync, lstatSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { createFamilyBridgeServer, type FamilyHttpOptions } from './family-bridge-server.js';
-export type FamilyFileOptions={bridgeTokenFile:string;upstreamTokenFile:string;groupsFile:string;ledgerPath:string;upstream:string};
+export type FamilyFileOptions={bridgeTokenFile:string;upstreamTokenFile:string;groupsFile:string;ledgerPath:string;upstream:string;upstreamTimeoutMs?:number};
 function fail():never {throw new Error('FAMILY_FILE_CONFIG');}
 function parents(path:string):void {
   if(!isAbsolute(path)||resolve(path)!==path)fail();
@@ -24,6 +24,8 @@ function protectedFile(path:string):string {
 }
 export function readFamilyBridgeFiles(files:FamilyFileOptions):FamilyHttpOptions {
   try {
+    const upstreamTimeoutMs=files.upstreamTimeoutMs===undefined?30_000:files.upstreamTimeoutMs;
+    if(!Number.isSafeInteger(upstreamTimeoutMs)||upstreamTimeoutMs<1||upstreamTimeoutMs>270_000)fail();
     if(files.upstream!=='http://127.0.0.1:19789/v1/responses')fail();
     const token=protectedFile(files.bridgeTokenFile).trim(),upstreamToken=protectedFile(files.upstreamTokenFile).trim();
     if(!/^[A-Za-z0-9_-]{32,256}$/.test(token)||!/^[A-Za-z0-9_-]{32,256}$/.test(upstreamToken))fail();
@@ -32,7 +34,7 @@ export function readFamilyBridgeFiles(files:FamilyFileOptions):FamilyHttpOptions
     parents(files.ledgerPath);
     try {const st=lstatSync(files.ledgerPath);if(!st.isFile()||st.nlink!==1||(st.mode&0o077)!==0||st.uid!==process.getuid?.())fail();}
     catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
-    return {token,upstreamToken,groups,ledgerPath:files.ledgerPath,upstream:files.upstream};
+    return {token,upstreamToken,groups,ledgerPath:files.ledgerPath,upstream:files.upstream,upstreamTimeoutMs};
   }catch{fail();}
 }
 export function launchFamilyBridge(files:FamilyFileOptions){

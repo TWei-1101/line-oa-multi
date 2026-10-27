@@ -1,3 +1,10 @@
+# Unreleased — standalone Family bridge
+
+- 獨立 Family bridge 的檔案式 launcher 新增有界 `upstreamTimeoutMs` 設定（1～270,000 ms）；未指定時維持 30 秒相容預設。
+- 隨附 `family-bridge-files` 啟動入口明確使用 270 秒，為 HA 端 300 秒請求上限保留 30 秒餘裕；逾時仍保留不確定事件，不會自動重跑。
+- **只更新 HA Add-on 不會套用此修正**：Add-on runtime 未包含／啟動此獨立 launcher，也不會更新另一台主機的 bridge。須另外建置並更新獨立 bridge 的兩個 launcher 檔案，在無進行中請求時受控重新啟動該 bridge。詳見 [Family bridge 說明](../docs/family-bridge.md#timeout-update-and-addon-scope)。
+- 未變更 Add-on 版本、Gateway 設定、模型或既有 held 工作；本項不是新的 Add-on 發布。
+
 # 0.3.0-dev.6
 
 - 合併原作者 `v0.1.11`／`v0.1.12`：聯絡人快取依登入 OA 持久化並隔離，最多保留 10,000 筆。

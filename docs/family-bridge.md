@@ -39,3 +39,15 @@ Before an older/non-family-aware candidate is started, run npm run family-downgr
 ## Still-required activation gates
 
 Verified TLS trust or authenticated loopback-ended tunnel; dedicated bridge credential provision/transfer; exact user-approved group→OA mapping and test window; verified HA source/build/Supervisor maintenance path; and version-matched .241 runtime tools/context/native/plugin/owner-command isolation evidence. Shared group sessions expose admitted members to the same conversation context. If shared Gateway owner-command/context isolation is not provable, keep disabled and use a separate restricted Gateway/OS principal; agent selection is not a security tenant boundary. No production-readiness or activation approval is implied. DOM/API tests are meaningful interaction coverage, not visual browser verification.
+
+## Timeout update and Add-on scope
+
+The file-based standalone launcher accepts optional `upstreamTimeoutMs`: a safe integer from 1 to 270000 milliseconds. Omitting it preserves the 30000 ms default. The supplied `scripts/family-bridge-files.ts` entrypoint explicitly selects 270000 ms, leaving a 30-second margin beneath an HA job timeout of 300 seconds. Verify the actual HA timeout before using that entrypoint; do not assume all deployments use 300 seconds. The generic environment-based `family-bridge-server` entrypoint is unchanged.
+
+Updating only the HA Add-on does **not** install this fix on an independently deployed bridge. The Add-on Dockerfile copies compiled source modules but only the controlled-start and downgrade-preflight scripts; it neither ships this file-based launcher entrypoint nor runs or updates a separate bridge service. This standalone-only change therefore does not bump the Add-on version or announce a new Add-on release.
+
+For an existing standalone deployment, build and test the source, then review the compiled `dist/src/family-file-launcher.js` and `dist/scripts/family-bridge-files.js` against that deployment. Update only these two files when the remaining runtime is compatible; do not replace an older runtime with the entire current build without review. Preserve protected credentials and ledger, back up the two existing files, prevent new intake, and confirm no active bridge/Gateway request before a bridge-only restart. A longer request deadline is not a graceful-shutdown guarantee: verify service stop limits and drain first. Roll back only the two launcher files if needed, never an older ledger.
+
+Inspect service dependencies: restarting the bridge may also stop its requiring proxy; verify both loopback and LAN paths afterward. Maintain an enforced dispatch barrier throughout maintenance; an empty socket snapshot is insufficient. An all-account worker pause requires separate authorization.
+
+Existing uncertain/dispatching events remain held. Increasing the timeout does not authorize retry, replay, skip, ledger deletion, or external test messages. Inspect effects and obtain a separate recovery decision. No Gateway/model changes are required.
