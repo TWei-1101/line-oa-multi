@@ -13,6 +13,11 @@
   bounded jitter, concurrent scheduling and the existing fork regressions.
 - Backup/version policy checks pass. No live LINE message was sent and no
   running HA/OpenClaw account, Session or queue was changed.
+- The first remote container run exposed a pre-existing smoke-policy mismatch:
+  the controlled startup script had been added to the runtime in `0.3.0-dev.4`
+  while the smoke test still prohibited the entire scripts directory. The image
+  now includes only the two required audited scripts and the smoke test checks
+  that exact allowlist.
 - Added a daily/manual GitHub workflow that compares the reviewed upstream pin
   with upstream `main`. It opens or refreshes one guarded sync issue when an
   update appears and closes it after the pin catches up; it never writes

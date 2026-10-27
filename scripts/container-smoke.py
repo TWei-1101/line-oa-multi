@@ -37,8 +37,9 @@ try:
     assert node_arch == expected_node_arch
     labels = image['Config']['Labels']
     assert labels['io.hass.version'] == json.loads(run('exec', name, 'node', '-p', 'JSON.stringify(JSON.parse(require("fs").readFileSync("/app/package.json","utf8")).version)'))
-    # Only source JS, public web and package metadata; no compiler or node_modules.
-    run("exec", name, "node", "-e", "const fs=require('fs');for(const p of ['/app/node_modules','/app/dist/tests','/app/dist/scripts','/usr/local/bin/npm'])if(fs.existsSync(p))process.exit(1)")
+    # Only runtime source, the audited startup/preflight scripts, public web and
+    # package metadata; no compiler, tests, adapter utilities or node_modules.
+    run("exec", name, "node", "-e", "const fs=require('fs');for(const p of ['/app/node_modules','/app/dist/tests','/usr/local/bin/npm'])if(fs.existsSync(p))process.exit(1);const allowed=new Set(['controlled-start.js','family-downgrade-preflight.js']);const scripts=fs.readdirSync('/app/dist/scripts');if(scripts.length!==allowed.size||scripts.some(p=>!allowed.has(p)))process.exit(1)")
     run("stop", "--time", "30", name)
     assert json.loads(run("inspect", name))[0]["State"]["ExitCode"] == 0
     run("start", name)

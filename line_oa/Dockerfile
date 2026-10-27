@@ -25,7 +25,8 @@ ENV NODE_ENV=production DATA_DIR=/data
 WORKDIR /app
 # No production dependencies: Gateway uses only Node.js built-ins.
 COPY --from=build /build/dist/src ./dist/src
-COPY --from=build /build/dist/scripts ./dist/scripts
+COPY --from=build /build/dist/scripts/controlled-start.js ./dist/scripts/controlled-start.js
+COPY --from=build /build/dist/scripts/family-downgrade-preflight.js ./dist/scripts/family-downgrade-preflight.js
 COPY app/web ./web
 COPY app/package.json ./package.json
 COPY LICENSE ./LICENSE

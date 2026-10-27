@@ -4,6 +4,7 @@
 - 新增可調整或停用的 Session 檢查間隔，以及不含憑證的持久化自動登入歷程。
 - 發送文字／圖片後重新計算 idle check deadline，保留有界隨機延遲並修正排程競態。
 - 保留多帳號、OpenClaw durable queue、收件人快照與共用認證管理相容性。
+- Runtime 映像只納入受控啟動與降版預檢兩個 scripts，並讓容器 smoke 精確驗證允許清單與正常停止。
 
 # 0.3.0-dev.5
 
