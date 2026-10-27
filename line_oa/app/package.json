@@ -1,6 +1,6 @@
 {
   "name": "line-oa-ha-addon",
-  "version": "0.3.0-dev.5",
+  "version": "0.3.0-dev.6",
   "private": true,
   "description": "輕量化 LINE Official Account 聊天通知 Gateway",
   "type": "module",

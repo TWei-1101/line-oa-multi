@@ -1,9 +1,13 @@
 import https from 'node:https';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import { diagnosticText, networkDetails } from './diagnostics.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Contact, SendResult, SessionCredentials } from './types.js';
 import { SessionManager } from './session.js';
 import { LINE_USER_AGENT } from './line-browser.js';
+
+export type RecoveryTrigger = 'scheduled_check' | 'startup_check' | 'manual_check' | 'send' | 'contacts';
 
 type RawResponse = { status: number; body: unknown; contentType: string; details?: string; headers?: Record<string, unknown> };
 export type RequestFn = (method: string, path: string, headers: Record<string, string>, body?: string | Buffer) => Promise<RawResponse>;
@@ -49,11 +53,13 @@ function classify(status: number, details?: string): LineError {
 
 export class LineClient {
   private readonly request: RequestFn;
+  private readonly recoveryTrigger = new AsyncLocalStorage<RecoveryTrigger>();
   private validation?: { credentials: SessionCredentials; promise: Promise<void> };
   private recovery?: { credentials: SessionCredentials; promise: Promise<void> };
   constructor(private readonly sessions: SessionManager, timeoutMs: number, request?: RequestFn,
     private readonly onFailure?: (code: string, details: string) => void,
-    private readonly recoverSession?: (credentials: SessionCredentials) => Promise<void>) {
+    private readonly recoverSession?: (credentials: SessionCredentials, trigger: RecoveryTrigger) => Promise<void>,
+    private readonly recoveryAllowed: (trigger: RecoveryTrigger) => boolean = () => true) {
     const rawRequest = request ?? requestHttps(timeoutMs);
     this.request = async (method, path, headers, body) => {
       const credentials = this.sessions.getCredentials();
@@ -62,11 +68,12 @@ export class LineClient {
         let sentCookie = headers.Cookie;
         let response = await rawRequest(method, path, headers, body);
         if (credentials && this.sessions.getCredentials() !== credentials) throw new Error('SESSION_CHANGED');
-        if (credentials && this.recoverSession && response.status === 401 &&
+        const trigger = this.recoveryTrigger.getStore() ?? (method === 'POST' ? 'send' : 'contacts');
+        if (credentials && this.recoverSession && this.recoveryAllowed(trigger) && response.status === 401 &&
           (response.body as { code?: unknown } | null)?.code === 'not_login') {
           // Retry only an explicit unauthenticated rejection, never an ambiguous send.
           // Another request may already have renewed this exact credential object.
-          if (sentCookie === this.headers(credentials).Cookie) await this.repair(credentials);
+          if (sentCookie === this.headers(credentials).Cookie) await this.repair(credentials, trigger);
           if (this.sessions.getCredentials() !== credentials) throw new Error('SESSION_CHANGED');
           sentCookie = this.headers(credentials).Cookie;
           response = await rawRequest(method, path, { ...headers, ...this.headers(credentials) }, body);
@@ -93,10 +100,10 @@ export class LineClient {
     };
   }
 
-  private async repair(credentials: SessionCredentials): Promise<void> {
+  private async repair(credentials: SessionCredentials, trigger: RecoveryTrigger): Promise<void> {
     if (this.recovery?.credentials === credentials) return this.recovery.promise;
     const promise = (async () => {
-      try { await this.recoverSession!(credentials); }
+      try { await this.recoverSession!(credentials, trigger); }
       catch (error) {
         if (error instanceof Error && error.message === 'SESSION_CHANGED') throw error;
         const code = error instanceof Error && /^LOGIN_[A-Z0-9_]+$/.test(error.message) ? error.message : 'LOGIN_RECOVERY_FAILED';
@@ -166,13 +173,13 @@ export class LineClient {
     return { list, ...(typeof raw.next === 'string' && raw.next ? { next: raw.next } : {}) };
   }
 
-  async validate(): Promise<void> {
+  async validate(trigger: RecoveryTrigger = 'manual_check'): Promise<void> {
     const credentials = this.requireCredentials();
     if (this.validation?.credentials === credentials) return this.validation.promise;
-    const validation = { credentials, promise: (async () => {
+    const validation = { credentials, promise: this.recoveryTrigger.run(trigger, async () => {
       await this.refreshCsrf();
       await this.getContacts('', 1);
-    })() };
+    }) };
     this.validation = validation;
     try { await validation.promise; }
     finally { if (this.validation === validation) this.validation = undefined; }

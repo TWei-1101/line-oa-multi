@@ -21,3 +21,5 @@ footer{text-align:center;color:var(--muted);font-size:13px;padding-top:26px}
 @media(max-width:720px){.grid{grid-template-columns:1fr 1fr}.row{flex-wrap:wrap}.row input{flex-basis:100%}dl{grid-template-columns:1fr}dd{margin-bottom:7px}header{align-items:flex-start}.badge{margin-top:5px}.qr-login{grid-template-columns:1fr}.qr-frame{width:max-content}}
 
 .contact-help{padding-left:24px;line-height:1.8}.contact-help li{margin:8px 0}#logList .item>div{min-width:0;width:100%}#logList pre{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);background:#08100e;padding:14px;border-radius:8px;max-height:480px;overflow:auto;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}#qrLoginMessage,#sendResult,#imageResult,#loginError{white-space:pre-wrap;overflow-wrap:anywhere}#qrLoginMessage{max-height:360px;overflow:auto}
+
+.log-tabs{display:flex;gap:8px;margin:12px 0}.log-tabs button{white-space:nowrap}#autoLoginLogList .item>div{min-width:0;overflow-wrap:anywhere}#sessionCheckForm{max-width:600px}#sessionCheckMinutes{max-width:240px}#sessionCheckResult{white-space:pre-wrap;overflow-wrap:anywhere}

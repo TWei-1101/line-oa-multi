@@ -5,8 +5,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PairingManager, PairingError } from './pairing.js';
 import { DiscoveryPublisher, supervisorRequest, type SupervisorRequest } from './discovery.js';
 import { trustedIngress, ingressPath, ingressMutationAllowed } from './ingress.js';
-import { DATA_DIR, loadConfig } from './config.js';
+import { DATA_DIR, loadConfig, validSessionCheckMinutes } from './config.js';
 import { MemoryLogger } from './logger.js';
+import { AutoLoginHistory } from './auto-login-history.js';
+import { atomicWriteJson } from './storage.js';
 import { SessionManager } from './session.js';
 import { SessionMonitor } from './session-monitor.js';
 import { LineClient, LineError, type RequestFn } from './line-client.js';
@@ -32,7 +34,7 @@ export interface GatewayOptions {
 
 export async function createGateway(options: GatewayOptions = {}) {
 const dataDir = options.dataDir ?? DATA_DIR;
-const version = '0.3.0-dev.5';
+const version = '0.3.0-dev.6';
 const startedAt = Date.now();
 const webDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web');
 const { config, warning: configWarning } = await loadConfig(dataDir);
@@ -40,16 +42,20 @@ const logger = new MemoryLogger();
 if (configWarning) logger.add('CONFIG', 'WARNING', undefined, configWarning);
 const sessions = new SessionManager(dataDir);
 await sessions.load();
+const autoLoginHistory = new AutoLoginHistory(dataDir, logger);
+await autoLoginHistory.load();
 const qrLogin = options.qrLogin ?? new BusinessQrLogin(sessions, (operation, result, target, error, details) => logger.add(operation, result, target, error, details));
-const client = new LineClient(sessions, config.requestTimeoutMs, options.lineRequest, (code, details) => logger.add('LINE_UPSTREAM', 'FAILED', undefined, code, details), credentials => qrLogin.recover(credentials));
-const contacts = new ContactService(client, dataDir, config.contactsCacheTtlMs);
+const client = new LineClient(sessions, config.requestTimeoutMs, options.lineRequest, (code, details) => logger.add('LINE_UPSTREAM', 'FAILED', undefined, code, details), (credentials, trigger) => autoLoginHistory.run(trigger, () => qrLogin.recover(credentials)),
+  trigger => config.sessionCheckIntervalMinutes > 0 || trigger === 'send');
+const contacts = new ContactService(client, dataDir, config.contactsCacheTtlMs, () => sessions.getCredentials()?.botId ?? null);
 await contacts.load();
 if (contacts.warning) logger.add('CONTACTS_CONFIG', 'WARNING', undefined, contacts.warning);
-const sessionMonitor = new SessionMonitor(sessions, client, logger, () => sender.isBusy(), options.sessionCheckDelayMs);
+const sessionMonitor = new SessionMonitor(sessions, client, logger, () => sender.isBusy(), config.sessionCheckIntervalMinutes, options.sessionCheckDelayMs);
 const images = new ImageSender(join(dataDir, 'tmp'), config.maxImageBytes, config.maxTempBytes);
 await images.init();
 const sender = new MessageSender(client, sessions, contacts, logger, config.duplicateWindowMs,
-  config.rateLimitPerMinute, () => sessionMonitor.messageSent(), {}, images);
+  config.rateLimitPerMinute, () => sessionMonitor.messageSent(), {}, images,
+  () => config.sessionCheckIntervalMinutes > 0);
 const auth = options.authManager ?? new AuthManager(dataDir, config.secureCookies);
 if (!options.authManager) await auth.load();
 const pairing = new PairingManager(auth, config.instanceId);
@@ -159,7 +165,7 @@ function handleV1Error(res: ServerResponse, error: unknown): void {
 function assertV1Session(): void {
   const state = sessions.getStatus().state;
   if (state === 'AUTH_REQUIRED') throw new Error('AUTH_REQUIRED');
-  if (state === 'EXPIRED') throw new Error('SESSION_EXPIRED');
+  if (state === 'EXPIRED' && config.sessionCheckIntervalMinutes > 0) throw new Error('SESSION_EXPIRED');
 }
 
 function requestSignal(req: IncomingMessage, res: ServerResponse): AbortSignal {
@@ -225,6 +231,7 @@ async function handleApiV1(req: IncomingMessage, res: ServerResponse, path: stri
   return v1Error(res, 404, 'INVALID_REQUEST', '找不到指定的 API 路徑');
 }
 
+let settingsWrites: Promise<void> = Promise.resolve();
 const handleUi = async (req: IncomingMessage, res: ServerResponse) => {
   try {
     if (!(options.ingressTrust ?? trustedIngress)(req) || !ingressPath(req)) return json(res, 403, { error: 'INGRESS_REQUIRED' });
@@ -262,7 +269,7 @@ const handleUi = async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method === 'POST' && path === '/api/session/logout') {
       if (sender.isBusy()) throw new Error('SEND_BUSY');
       qrLogin.close();
-      contacts.clearCache();
+      await contacts.clearCache();
       await sessions.logout();
       logger.add('LINE_LOGOUT', 'SUCCESS');
       return json(res, 200, sessions.getStatus());
@@ -310,6 +317,10 @@ const handleUi = async (req: IncomingMessage, res: ServerResponse) => {
       try { await client.validate(); sessions.mark('CONNECTED', 'Session 驗證成功'); logger.add('SESSION_VALIDATE', 'SUCCESS'); return json(res, 200, sessions.getStatus()); }
       catch (error) { const kind = error instanceof LineError ? error.kind : 'NETWORK'; sessions.mark(kind === 'AUTH' ? 'EXPIRED' : kind === 'NETWORK' ? 'DISCONNECTED' : 'ERROR', `驗證失敗：${error instanceof LineError ? error.code : kind}`); const code = error instanceof LineError ? error.code : 'SESSION_VALIDATION_FAILED'; logger.add('SESSION_VALIDATE', 'FAILED', undefined, code); return json(res, 503, { ...sessions.getStatus(), error: code, error_name: code, ...(error instanceof LineError ? { upstream_status: error.status, details: error.details } : {}) }); }
     }
+    if (req.method === 'GET' && path === '/api/contacts/cache') {
+      await contacts.syncAccount();
+      return json(res, 200, { list: contacts.allCached(), cached: true, aliases: contacts.getAliases() });
+    }
     if (req.method === 'GET' && path === '/api/contacts') {
       const query = requestUrl.searchParams.get('query') ?? '';
       const next = requestUrl.searchParams.get('next') ?? undefined;
@@ -340,6 +351,24 @@ const handleUi = async (req: IncomingMessage, res: ServerResponse) => {
       const signal = requestSignal(req, res);
       const result = await sender.sendImage(target, buffer, type, signal);
       return json(res, result.result === 'SUBMITTED' || result.result === 'UNKNOWN' ? 202 : 502, result);
+    }
+    if (req.method === 'GET' && path === '/api/auto-login/logs') return json(res, 200, { logs: autoLoginHistory.list() });
+    if (req.method === 'GET' && path === '/api/settings') return json(res, 200, { sessionCheckIntervalMinutes: config.sessionCheckIntervalMinutes });
+    if (req.method === 'PUT' && path === '/api/settings') {
+      const body = await bodyJson(req);
+      if (!validSessionCheckMinutes(body.sessionCheckIntervalMinutes) || Object.keys(body).some(key => key !== 'sessionCheckIntervalMinutes')) throw new Error('INVALID_INPUT');
+      const minutes = body.sessionCheckIntervalMinutes;
+      // Serialize disk and RAM updates together, including overlapping browser saves.
+      const update = settingsWrites.then(async () => {
+        await atomicWriteJson(join(dataDir, 'config.json'), { ...config, sessionCheckIntervalMinutes: minutes });
+        config.sessionCheckIntervalMinutes = minutes;
+        sessionMonitor.configure(minutes);
+        if (!minutes && sessions.getStatus().state === 'VALIDATING') sessions.mark('VALIDATING', '已載入 Session；定時檢查已停用，等待發送或手動測試確認連線');
+      });
+      settingsWrites = update.catch(() => undefined);
+      await update;
+      logger.add('SETTINGS', 'SUCCESS');
+      return json(res, 200, { sessionCheckIntervalMinutes: minutes });
     }
     if (req.method === 'GET' && path === '/api/logs') return json(res, 200, { logs: logger.list() });
     return json(res, 404, { error: 'NOT_FOUND' });
@@ -382,7 +411,10 @@ return {
   pairing, discovery, sessions, contacts, auth, sender, uiServer, apiServer,
   startEmbedded() {
     sessionMonitor.start();
-    if (sessions.getStatus().state === 'VALIDATING') void sessionMonitor.check();
+    if (sessions.getStatus().state === 'VALIDATING') {
+      if (sessionMonitor.enabled) void sessionMonitor.check('startup_check');
+      else sessions.mark('VALIDATING', '已載入 Session；定時檢查已停用，等待發送或手動測試確認連線');
+    }
   },
   async start(apiPort = 8787, uiPort = 8099, host = '0.0.0.0') {
     const listen = (server: http.Server, port: number) => new Promise<void>((resolve, reject) => {
@@ -396,7 +428,10 @@ return {
     sessionMonitor.start();
     // Resolve restored credentials once at startup; HA polls only the cached result.
     // Keep listeners responsive while validation (and any recovery) is in progress.
-    if (sessions.getStatus().state === 'VALIDATING') void sessionMonitor.check();
+    if (sessions.getStatus().state === 'VALIDATING') {
+      if (sessionMonitor.enabled) void sessionMonitor.check('startup_check');
+      else sessions.mark('VALIDATING', '已載入 Session；定時檢查已停用，等待發送或手動測試確認連線');
+    }
   },
   stop(): Promise<void> {
     if (stopping) return stopping;
@@ -411,7 +446,7 @@ return {
       });
       const deadline = setTimeout(() => { apiServer.closeAllConnections(); uiServer.closeAllConnections(); }, 20_000);
       deadline.unref();
-      try { await Promise.all([close(apiServer), close(uiServer)]); await images.cleanup(); }
+      try { await Promise.all([close(apiServer), close(uiServer)]); await settingsWrites; await images.cleanup(); }
       finally { clearTimeout(deadline); }
     })();
     return stopping;

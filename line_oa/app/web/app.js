@@ -7,6 +7,7 @@ let qrPollBusy=false;
 let qrImageLoaded=false;
 let qrCompletionHandled=false;
 let sessionConnected=false;
+let logView='general';
 const $=id=>document.getElementById(id);
 const fmt=t=>t?new Date(t).toLocaleString('zh-TW',timezone?{timeZone:timezone,timeZoneName:'short'}:{timeZoneName:'short'}):'—';
 
@@ -27,7 +28,7 @@ async function api(path,options={}){
 async function boot(){
   const state=await api('api/auth/session');
   if(state.authenticated){
-    csrf=state.csrfToken;showApp();await refreshAll();
+    csrf=state.csrfToken;showApp();await refreshAll();await loadSettings();
     await pollQrOnce();
   }else{
     $('loginPanel').hidden=false;$('app').hidden=true;
@@ -35,7 +36,7 @@ async function boot(){
   }
 }
 function showApp(){$('loginPanel').hidden=true;$('app').hidden=false}
-async function refreshAll(){await Promise.all([status(),loadAliases(),logs(),loadApiKey()])}
+async function refreshAll(){await Promise.all([status(),loadAliases(),logs(),loadApiKey(),loadCachedContacts()])}
 async function status(){
   const s=await api('api/status');
   timezone=s.timezone;
@@ -98,7 +99,15 @@ async function loadAliases(){
 function updateTargetInfo(){const alias=$('target').value;const box=$('targetInfo');box.hidden=!alias;if(!alias)return;$('targetAlias').value=alias;$('targetYaml').textContent=`action: line_oa.send_text\ndata:\n  who: ${alias}\n  message: "洗衣機已完成"`;$('copyStatus').textContent=''}
 async function loadContacts(force=false){
   const query=$('contactQuery').value;const data=force?await api('api/contacts/refresh',{method:'POST',body:JSON.stringify({query})}):await api(`api/contacts?query=${encodeURIComponent(query)}`);
-  aliases=data.aliases;const list=$('contactList');list.textContent='';if(!data.list.length){list.textContent='沒有結果';return}
+  renderContacts(data);await status();
+}
+async function loadCachedContacts(){
+  const data=await api('api/contacts/cache');
+  const query=$('contactQuery').value.toLocaleLowerCase();
+  renderContacts({...data,list:data.list.filter(c=>c.name.toLocaleLowerCase().includes(query))});
+}
+function renderContacts(data){
+  aliases=data.aliases;const list=$('contactList');list.textContent='';if(!data.list.length){list.textContent='尚無符合的聯絡人；請按「重新整理」從 LINE 載入。';return}
   for(const c of data.list){
     const row=document.createElement('div');row.className='item';const text=document.createElement('div');const name=document.createElement('strong');name.textContent=c.name;
     const meta=document.createElement('small');meta.textContent=`${c.kind==='group'?'群組':'個人'} · ${c.chatId}`;text.append(name,document.createElement('br'),meta);
@@ -107,10 +116,34 @@ async function loadContacts(force=false){
   }
 }
 async function logs(){
+  if(logView==='automatic')return autoLoginLogs();
   const data=await api('api/logs');const list=$('logList');list.textContent='';
   for(const x of data.logs){const row=document.createElement('div');row.className='item';const left=document.createElement('div');const strong=document.createElement('strong');strong.textContent=`${x.operation} · ${x.result}`;const small=document.createElement('small');small.textContent=`${x.localTime||fmt(x.time)}${x.target?' · '+x.target:''}${x.error?' · '+x.error:''}`;left.append(strong,document.createElement('br'),small);if(x.details){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='系統回應／除錯詳情';const pre=document.createElement('pre');pre.textContent=x.details;details.append(summary,pre);left.append(details)}row.append(left);list.append(row)}
   if(!data.logs.length)list.textContent='尚無操作紀錄';
 }
+async function autoLoginLogs(){
+  const data=await api('api/auto-login/logs');const list=$('autoLoginLogList');list.textContent='';
+  const triggers={scheduled_check:'定時檢查',startup_check:'啟動檢查',manual_check:'手動測試連線',send:'發送訊息',contacts:'讀取聯絡人'};
+  const results={STARTED:'進行中',SUCCESS:'成功',FAILED:'失敗',INTERRUPTED:'服務中斷，結果未確認'};
+  for(const x of data.logs){
+    const row=document.createElement('div');row.className='item';const content=document.createElement('div');
+    const title=document.createElement('strong');title.textContent=`${triggers[x.trigger]||x.trigger} · ${results[x.result]||x.result}`;
+    title.className=x.result==='SUCCESS'?'success':x.result==='FAILED'?'error':'';
+    const timing=document.createElement('small');timing.textContent=`開始：${x.startedLocalTime||fmt(x.startedAt)}`;
+    content.append(title,document.createElement('br'),timing);
+    if(x.completedAt){const done=document.createElement('small');done.textContent=`結束：${x.completedLocalTime||fmt(x.completedAt)} · 耗時 ${(x.durationMs/1000).toFixed(1)} 秒`;content.append(document.createElement('br'),done)}
+    if(x.error){const error=document.createElement('div');error.className='error';error.textContent=x.error;content.append(error)}
+    row.append(content);list.append(row);
+  }
+  if(!data.logs.length)list.textContent='尚無自動登入紀錄。一般檢查未觸發登入時不會新增紀錄。';
+}
+function selectLogView(view){
+  logView=view;$('generalLogHelp').hidden=view!=='general';$('generalLogsPanel').hidden=view!=='general';$('autoLoginLogsPanel').hidden=view!=='automatic';
+  for(const [id,name]of [['generalLogsTab','general'],['autoLoginLogsTab','automatic']]){const button=$(id);button.className=name===view?'active':'secondary';button.setAttribute('aria-pressed',String(name===view))}
+  logs().catch(error=>alert(error.message));
+}
+async function loadSettings(){const data=await api('api/settings');$('sessionCheckMinutes').value=data.sessionCheckIntervalMinutes}
+
 async function loadApiKey(){
   const data=await api('api/pairing/status');
   $('pairingState').textContent=data.paired?'已配對':'等待 Home Assistant 確認配對';
@@ -118,16 +151,23 @@ async function loadApiKey(){
   $('discoveryState').textContent=data.discovery_status;
 }
 
-$('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';try{const data=await api('api/auth/login',{method:'POST',body:JSON.stringify({password:$('password').value})});csrf=data.csrfToken;$('password').value='';showApp();await refreshAll()}catch(err){$('loginError').textContent=err.message}};
+$('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';try{const data=await api('api/auth/login',{method:'POST',body:JSON.stringify({password:$('password').value})});csrf=data.csrfToken;$('password').value='';showApp();await refreshAll();await loadSettings()}catch(err){$('loginError').textContent=err.message}};
 $('logoutLine').onclick=async()=>{
   if(!confirm('確定登出 LINE？將清除此 Add-on 保存的 LINE 登入資料，之後需要重新登入。收件者別名與 Home Assistant 配對會保留。'))return;
   lineLogoutBusy=true;$('logoutLine').disabled=true;$('startQrLogin').disabled=true;$('validateSession').disabled=true;
   try{await api('api/session/logout',{method:'POST',body:'{}'});stopQrPolling();qrCompletionHandled=false;renderQr({status:'idle',hasQr:false});$('contactList').textContent='已登出，重新登入後請按「重新整理」載入聯絡人。';await refreshAll()}
   catch(error){alert(error.message)}finally{lineLogoutBusy=false;$('logoutLine').disabled=false;$('startQrLogin').disabled=false;$('validateSession').disabled=false}
 };
+$('generalLogsTab').onclick=()=>selectLogView('general');
+$('autoLoginLogsTab').onclick=()=>selectLogView('automatic');
+$('sessionCheckForm').onsubmit=async event=>{
+  event.preventDefault();const result=$('sessionCheckResult');result.textContent='';$('saveSessionCheck').disabled=true;
+  try{const data=await api('api/settings',{method:'PUT',body:JSON.stringify({sessionCheckIntervalMinutes:Number($('sessionCheckMinutes').value)})});$('sessionCheckMinutes').value=data.sessionCheckIntervalMinutes;result.className='success';result.textContent=data.sessionCheckIntervalMinutes===0?'已停用定時檢查；發送遇到登入失效時才嘗試自動恢復。':`已設定閒置 ${data.sessionCheckIntervalMinutes} 分鐘再加隨機 1～10 分鐘後檢查；再次發送會重新計時。`}
+  catch(error){result.className='error';result.textContent=error.message}finally{$('saveSessionCheck').disabled=false}
+};
 $('refreshLogs').onclick=()=>logs().catch(error=>alert(error.message));
 $('logout').onclick=async()=>{await api('api/auth/logout',{method:'POST',body:'{}'});csrf='';location.reload()};
-document.querySelectorAll('nav [data-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('nav [data-tab]').forEach(x=>{x.classList.remove('active');x.setAttribute('aria-selected','false')});document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));button.classList.add('active');button.setAttribute('aria-selected','true');$(button.dataset.tab).classList.add('active');if(button.dataset.tab==='logs')logs()});
+document.querySelectorAll('nav [data-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('nav [data-tab]').forEach(x=>{x.classList.remove('active');x.setAttribute('aria-selected','false')});document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));button.classList.add('active');button.setAttribute('aria-selected','true');$(button.dataset.tab).classList.add('active');if(button.dataset.tab==='logs')logs().catch(e=>alert(e.message));if(button.dataset.tab==='contacts')loadCachedContacts().catch(e=>alert(e.message))});
 $('validateSession').onclick=async()=>{try{await api('api/session/validate',{method:'POST',body:'{}'});await status()}catch(e){await status();alert(e.message)}};
 $('startQrLogin').onclick=async()=>{qrCompletionHandled=false;renderQr({status:'starting',hasQr:false,message:'正在向 LINE 取得短效 QR Code…'});try{renderQr(await api('api/session/qr/start',{method:'POST',body:'{}'}))}catch(error){renderQr({status:'error',hasQr:false,message:error.message})}};
 $('cancelQrLogin').onclick=async()=>{try{renderQr(await api('api/session/qr/cancel',{method:'POST',body:'{}'}))}catch(error){renderQr({status:'error',hasQr:false,message:error.message})}};

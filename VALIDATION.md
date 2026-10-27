@@ -1,5 +1,23 @@
 # Validation record — 2026-10-19
 
+## Upstream Add-on v0.1.12 sync and monitor — 2026-10-27
+
+- Ported upstream `v0.1.11` and `v0.1.12` through
+  `050f4fb32c263be9f4922c08c58f56baaa8e7cf8`, retaining the fork's
+  multi-account, OpenClaw, recipient-binding, shared authentication and
+  controlled-start behavior.
+- Node 24.18.0 strict TypeScript build and the complete local suite pass:
+  188 passed / 0 failed with `TMPDIR=/private/tmp`. Coverage includes
+  account-bound persistent contacts, settings migration/live updates,
+  disabled checks, durable redacted auto-login history, send-based idle resets,
+  bounded jitter, concurrent scheduling and the existing fork regressions.
+- Backup/version policy checks pass. No live LINE message was sent and no
+  running HA/OpenClaw account, Session or queue was changed.
+- Added a daily/manual GitHub workflow that compares the reviewed upstream pin
+  with upstream `main`. It opens or refreshes one guarded sync issue when an
+  update appears and closes it after the pin catches up; it never writes
+  unreviewed upstream code directly to `main`.
+
 ## Upstream Add-on v0.1.10 sync — 2026-10-26
 
 - Ported the complete upstream delta from `afb9fe582013a50324a8aa9f7e04cfd5d2338000`

@@ -2,14 +2,16 @@
 
 This repository integrates the complete MIT-licensed xangin LINE OA Add-on and HACS sources with multi-account and Webhook support. It continues the original project rather than rewriting it. Two live accounts have been verified for QR login and message sending on HAOS; Webhook, backup/restore and long-running production use remain pending real-device validation.
 
-- Add-on upstream: `xangin/line-oa-ha-addon` at `7ccb348e5b43a11171937e528f0d8ce973bf7ff8` (`v0.1.10`).
+- Add-on upstream: `xangin/line-oa-ha-addon` at `050f4fb32c263be9f4922c08c58f56baaa8e7cf8` (`v0.1.12`).
 - HACS upstream: `xangin/line-oa-hacs` at `977980f149e8fc0d4a9f5ccaed3a1455b8c1b904`.
 - Original prototype retained under `prototype/`; its fixture tests are not deployment verification.
 - Upstream LICENSE is retained. Historical upstream docs and workflows are references; the installation guide below takes precedence.
 
 One Add-on manages up to 20 accounts. Each has its own LINE session, cookie jar, contacts, sender and data directory. Gateway API authentication and HA pairing are shared. Explicit `account` is required on HA send actions; account IDs use lowercase letters, digits, underscores and hyphens, starting with a letter (1–32 chars).
 
-Each account now uses the upstream `v0.1.10` shared text/image FIFO. Up to 32 active or waiting sends and 20 MiB are retained in memory per account; a queued request that waits more than 10 seconds is rejected as known-unsent. The obsolete local five-messages-per-minute limit is migrated to unlimited, while LINE's own limits and duplicate protection remain enforced.
+Each account now uses the upstream `v0.1.12` shared text/image FIFO. Up to 32 active or waiting sends and 20 MiB are retained in memory per account; a queued request that waits more than 10 seconds is rejected as known-unsent. The obsolete local five-messages-per-minute limit is migrated to unlimited, while LINE's own limits and duplicate protection remain enforced.
+
+Upstream `v0.1.11`/`v0.1.12` also persist a bounded account-specific contact cache, add a configurable session-check interval and durable auto-login history, and restore send-based idle-deadline resets with bounded jitter. These remain isolated per OA account in this fork.
 
 ```yaml
 action: line_oa.send_text
@@ -74,3 +76,7 @@ The same repository provides both required parts. They do not replace each other
 Do not install the upstream `xangin/line-oa-hacs` integration alongside this fork. Both use the `line_oa` domain.
 
 See [INSTALL-HAOS.md](INSTALL-HAOS.md) for installation, rollback and acceptance checks; [VALIDATION.md](VALIDATION.md) records actual validation status.
+
+## Upstream monitoring
+
+The daily `Upstream sync monitor` workflow compares `xangin/line-oa-ha-addon/main` with [docs/upstream-line-oa.json](docs/upstream-line-oa.json). A newer revision opens or refreshes one GitHub issue with the exact compare link and acceptance checklist; updating the pinned revision after a reviewed port closes it automatically. It deliberately never writes upstream changes straight to `main`, because shared sender, server and session files require semantic review against this fork's multi-account and OpenClaw guarantees.

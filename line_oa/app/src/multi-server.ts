@@ -330,7 +330,7 @@ export async function createMultiGateway(dataDir = DATA_DIR, options: { ingressT
       if(req.method==='GET'&&path==='/api/v1/status'&&!url.searchParams.has('account')){
         const states=accountStatus();
         const online=states.some(x=>x.logged_in);
-        return reply(res,200,{instance_id:controlConfig.instanceId,api_version:1,version:'0.3.0-dev.5',
+        return reply(res,200,{instance_id:controlConfig.instanceId,api_version:1,version:'0.3.0-dev.6',
           gateway_status:'running',line_logged_in:online,session_status:online?'ready':'auth_required',
           account_name:'LINE OA Multi',last_error:null,updated_at:new Date().toISOString(),
           accounts_count:states.length,accounts_connected:states.filter(x=>x.logged_in).length});

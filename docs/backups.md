@@ -2,7 +2,7 @@
 
 ## 備份包含什麼
 
-在 Home Assistant 系統備份中包含 LINE OA App。保留 App metadata、`config.json`（永久身份）、`aliases.json`、`options.json`、`secrets/line-session.json`、`secrets/api-key.json`（配對 Key 雜湊）及其他必要設定。
+在 Home Assistant 系統備份中包含 LINE OA App。保留 App metadata、`config.json`（永久身份）、`aliases.json`、`contacts.json`（最多 10,000 筆已查詢聯絡人）、`auto-login-history.json`（最近 200 筆自動登入紀錄）、`options.json`、`secrets/line-session.json`、`secrets/api-key.json`（配對 Key 雜湊）及其他必要設定。
 
 備份含敏感登入資料，請使用 HA 的備份保護機制並妥善保存復原金鑰。私有資料不會進入 GitHub Repository 或 GHCR 映像。
 
@@ -12,7 +12,7 @@
 - `cache/`、`.cache/`：可重新建立的快取。
 - `logs/`、`*.log`：可捨棄的日誌。
 
-聯絡人搜尋與近期操作紀錄原本就在 RAM；圖片會在使用後清除。正式設定不可存進上述暫存目錄。不能排除整個 `secrets/`。
+搜尋頁面快取與一般操作紀錄留在 RAM；圖片會在使用後清除。聯絡人清單與自動登入紀錄有筆數上限，另存於上述 JSON 並保留在備份中，以供重啟與還原後使用。正式設定不可存進上述暫存目錄。不能排除整個 `secrets/`。
 
 ## 為何使用預建映像
 

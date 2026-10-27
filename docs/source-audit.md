@@ -6,7 +6,7 @@
 
 - Gateway全為Node built-ins，只有TypeScript／Node typings開發相依，沒有原生Node addon、SQLite、Chromium或常駐瀏覽器。
 - SessionManager從`secrets/line-session.json`載入必要LINE Cookie，成功登入才原子替換；原QR流程為server-side Business ID頁面、QR/PIN長輪詢及OA選擇，瀏覽器不直接處理LINE Cookie。
-- ContactService原本同時保存aliases與contacts snapshot；本App保留aliases與RAM快取，移除長期完整contacts snapshot。
+- ContactService 保存別名與按官方帳號區分的聯絡人清單（最多 10,000 筆）；搜尋頁面快取仍在 RAM。
 - 原AuthManager支援admin password／browser CSRF與API SHA-256驗證。App保留後者，改由Ingress作管理授權及專用配對流程。
 - HACS使用health、status、aliases、text JSON與image multipart五個API。圖片不接受message；沒有增加notify實體。
 
@@ -18,10 +18,12 @@
 
 - `server.ts`：雙listener、可注入Mock、Ingress驗證、配對路由、啟停清理。
 - 新增`pairing.ts`、`discovery.ts`、`ingress.ts`。
+- `auto-login-history.ts`：保存最近 200 筆恢復嘗試的時間、來源與結果，不保存回應本文或憑證。
+- `session-monitor.ts`：依最後一次實際發送重新計算閒置期限，加入固定範圍的隨機延遲；0 停用啟動與背景檢查，設定經 Ingress／CSRF 驗證後持久保存。
 - `config.ts`：DATA_DIR=/data、固定容器listener、永久身份損壞fail closed。
 - `auth.ts`：憑證損壞fail closed、可指定cookie scope、CSRF byte-length檢查。
 - `storage.ts`：讀取既有檔強制0600、寫入後fsync目錄。
-- `contacts.ts`：只保存別名，搜尋快照留 RAM，舊格式別名仍可遷移；0.1.7 修正改用 Map，避免特殊鍵透過原型繼承繞過撤銷。
+- `contacts.ts`：別名與聯絡人清單原子保存，清單綁定官方帳號；登出與切換帳號防止舊的查詢回應恢復快取，舊格式別名仍可遷移；0.1.7 修正改用 Map，避免特殊鍵透過原型繼承繞過撤銷。
 - `images.ts`：0.1.7 修正序列化容量檢查與寫入，容量不明時拒絕，寫入失敗清除部分檔案。
 - `qr-login.ts`：0.1.7 修正將上游回應改為串流限量讀取，避免先讀入整份過大回應。
 - `api-v1.ts`：在health/status新增api_version=1，既有欄位保留。

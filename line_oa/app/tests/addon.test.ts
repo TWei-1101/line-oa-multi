@@ -217,7 +217,7 @@ test('real API text/image contract, UNKNOWN deduplication, alias validation and 
     h.gateway.sessions.mark('EXPIRED', 'mock expiry');
     assert.equal((await postText({ who: 'simon', message: 'expired' })).status, 409);
     assert.equal(textPosts, 2);
-    await assert.rejects(readFile(join(dir, 'contacts.json')), { code: 'ENOENT' });
+    assert.equal(JSON.parse(await readFile(join(dir, 'contacts.json'), 'utf8')).contacts[0].chatId, chatId);
   } finally { await h.close(); }
 });
 

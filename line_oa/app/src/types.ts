@@ -29,6 +29,7 @@ export interface GatewayConfig {
   listenHost: string;
   port: number;
   contactsCacheTtlMs: number;
+  sessionCheckIntervalMinutes: number;
   uiAuthEnabled: boolean;
   apiEnabled: boolean;
   secureCookies: boolean;

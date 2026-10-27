@@ -1,0 +1,77 @@
+name: Upstream sync monitor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/upstream-sync.yml
+      - docs/upstream-line-oa.json
+  schedule:
+    # 09:17 Asia/Taipei. Scheduled workflows use UTC.
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-line-oa-monitor
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare integrated and upstream revisions
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository=$(jq -r .repository docs/upstream-line-oa.json)
+          branch=$(jq -r .branch docs/upstream-line-oa.json)
+          integrated=$(jq -r .commit docs/upstream-line-oa.json)
+          latest=$(git ls-remote "https://github.com/${repository}.git" "refs/heads/${branch}" | cut -f1)
+          test "$latest" != ""
+          printf 'repository=%s\nbranch=%s\nintegrated=%s\nlatest=%s\n' "$repository" "$branch" "$integrated" "$latest" >> "$GITHUB_OUTPUT"
+          if test "$integrated" = "$latest"; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Open or refresh upstream sync issue
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ steps.upstream.outputs.repository }}
+          BRANCH: ${{ steps.upstream.outputs.branch }}
+          INTEGRATED: ${{ steps.upstream.outputs.integrated }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title='[upstream-sync] line-oa-ha-addon update available'
+          issue=$(gh issue list --state open --search "${title} in:title" --json number --jq '.[0].number // empty')
+          body=$(printf '%s\n\n%s\n\n- Integrated: `%s`\n- Latest `%s`: `%s`\n- Compare: https://github.com/%s/compare/%s...%s\n- Monitor run: %s/%s/actions/runs/%s\n\n%s\n\n- [ ] Review upstream source, tests and security impact\n- [ ] Port without replacing multi-account, OpenClaw or recipient-binding behavior\n- [ ] Bump fork version and update `docs/upstream-line-oa.json`\n- [ ] Run full Node, container and HACS CI\n- [ ] Confirm no credentials or live messages were used\n' \
+            'A newer upstream revision is available for guarded integration.' \
+            'This monitor intentionally does not write directly to `main`: shared gateway files require semantic conflict review.' \
+            "$INTEGRATED" "$BRANCH" "$LATEST" "$REPOSITORY" "$INTEGRATED" "$LATEST" \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" 'Acceptance checklist:')
+          if test "$issue" = ""; then
+            gh issue create --title "$title" --body "$body"
+          else
+            gh issue edit "$issue" --body "$body"
+          fi
+      - name: Close resolved upstream sync issue
+        if: steps.upstream.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title='[upstream-sync] line-oa-ha-addon update available'
+          issue=$(gh issue list --state open --search "${title} in:title" --json number --jq '.[0].number // empty')
+          if test "$issue" != ""; then
+            gh issue close "$issue" --comment 'The pinned upstream revision now matches upstream main.'
+          fi

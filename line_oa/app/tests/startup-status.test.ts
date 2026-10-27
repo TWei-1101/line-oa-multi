@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { AddressInfo } from 'node:net';
@@ -68,6 +68,12 @@ test('restart resolves HACS status without a send, manual validation, or idle ti
         assert.equal(status.line_logged_in, expected === 'ready' ? true
           : ['expired', 'auth_required'].includes(expected) ? false : null);
         assert.equal(recoveries, ['recovered', 'expired'].includes(scenario) ? 1 : 0);
+        const history = JSON.parse(await readFile(join(dir, 'auto-login-history.json'), 'utf8')).entries;
+        assert.equal(history.length, recoveries);
+        if (history.length) {
+          assert.equal(history[0].trigger, 'startup_check');
+          assert.equal(history[0].result, scenario === 'recovered' ? 'SUCCESS' : 'FAILED');
+        }
         const checkedCalls = calls;
         await getStatus(); await getStatus();
         assert.equal(calls, checkedCalls, 'HA polling must not trigger LINE checks');

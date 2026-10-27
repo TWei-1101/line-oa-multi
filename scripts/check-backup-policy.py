@@ -19,7 +19,7 @@ for item in ["tmp", "tmp/photo.png", "tmp/nested/payload", "cache", "cache/downl
     # Excluding the directory prevents traversal, including files nested more deeply.
     path = PurePosixPath(item)
     assert excluded(path) or any(excluded(parent) for parent in path.parents if str(parent) != "."), item
-for item in ["config.json", "aliases.json", "options.json", "secrets", "secrets/line-session.json", "secrets/api-key.json", "secrets/admin.json"]:
+for item in ["config.json", "aliases.json", "contacts.json", "auto-login-history.json", "options.json", "secrets", "secrets/line-session.json", "secrets/api-key.json", "secrets/admin.json"]:
     assert not excluded(item), item
 version = json.loads((root / "line_oa/app/package.json").read_text())["version"]
 assert f'version: "{version}"' in config

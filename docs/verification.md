@@ -2,7 +2,7 @@
 
 ## 自動測試
 
-上游 0.1.10 新增文字／圖片 FIFO、等待中的重複 request ID、容量與等待上限、斷線取消、停止服務、帳號／別名變更，以及舊版每分鐘 5 則設定遷移與超過 5 筆的 API 併發發送測試。本 fork 另驗證每帳號獨立佇列與 OpenClaw 收件人快照相容性。
+上游 0.1.12 累積加入文字／圖片 FIFO、持久化且按帳號隔離的聯絡人快取、可調整或停用的 Session 檢查、持久化自動登入歷程，以及送出後重設 idle deadline 與有界 jitter。上游提供 104 項 Mock 測試；本 fork 另驗證每帳號獨立佇列、OpenClaw 收件人快照與多帳號資料目錄相容性。
 
 0.1.10 包含 90 項上游 Mock 測試；Node.js 24 的 amd64／aarch64 原生建置與 smoke 結果以對應提交的 [GitHub Actions](https://github.com/xangin/line-oa-ha-addon/actions) 紀錄為準。測試涵蓋：
 

@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 import type { GatewayConfig } from './types.js';
 import { atomicWriteJson, ensurePrivateDir, readJsonSafe } from './storage.js';
 
+export const MAX_SESSION_CHECK_MINUTES = 10_080;
+export function validSessionCheckMinutes(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= MAX_SESSION_CHECK_MINUTES;
+}
+
 export const DATA_DIR = process.env.DATA_DIR || '/data';
 
 export const DEFAULT_CONFIG: GatewayConfig = {
@@ -10,6 +15,7 @@ export const DEFAULT_CONFIG: GatewayConfig = {
   listenHost: '0.0.0.0',
   port: 8787,
   contactsCacheTtlMs: 600_000,
+  sessionCheckIntervalMinutes: 45,
   uiAuthEnabled: false,
   apiEnabled: false,
   secureCookies: false,
@@ -24,7 +30,8 @@ function validConfig(value: unknown): value is GatewayConfig {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return typeof v.listenHost === 'string' && Number.isInteger(v.port) && typeof v.apiEnabled === 'boolean' &&
-    (v.instanceId === undefined || typeof v.instanceId === 'string');
+    (v.instanceId === undefined || typeof v.instanceId === 'string') &&
+    (v.sessionCheckIntervalMinutes === undefined || validSessionCheckMinutes(v.sessionCheckIntervalMinutes));
 }
 
 export async function loadConfig(dataDir = DATA_DIR): Promise<{ config: GatewayConfig; warning?: string }> {
@@ -47,6 +54,6 @@ export async function loadConfig(dataDir = DATA_DIR): Promise<{ config: GatewayC
   config.rateLimitPerMinute = 0;
 
   if (config.port < 1024 || config.port > 65535) config.port = DEFAULT_CONFIG.port;
-  if (configChanged || rateLimitChanged) await atomicWriteJson(path, config);
+  if (configChanged || rateLimitChanged || loaded.value.sessionCheckIntervalMinutes === undefined) await atomicWriteJson(path, config);
   return { config, warning: loaded.warning };
 }
