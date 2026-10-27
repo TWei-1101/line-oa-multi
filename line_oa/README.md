@@ -8,6 +8,9 @@
 
 **本 Add-on 必須搭配 [LINE OA HACS 整合](https://github.com/xangin/line-oa-hacs)使用。** HACS 安裝、配對、Actions 與自動化細節，請直接參閱 [HACS repo 的說明](https://github.com/xangin/line-oa-hacs#readme)。
 
+### 💡 0.3.0-dev.7 新增亮點
+- **OpenClaw 503 失敗工作 3 分鐘自動略過**：當遇到 `OPENCLAW_HTTP_503` 失敗且超過 3 分鐘未手動介入時，背景排程自動轉為 `ignored`，避免單次 503 暫態阻塞後續訊息。
+
 ### 💡 0.3.0-dev.6 新增亮點
 - **上游 v0.1.11／v0.1.12 登入維護**：聯絡人依 OA 帳號持久化；可調整或停用 Session 閒置檢查，並保留最近 200 筆不含憑證的自動登入紀錄。
 - **發送後重新計時**：文字與圖片送出後重設 idle deadline，搭配 1～10 分鐘有界 jitter，避免固定時間集中檢查。

@@ -78,6 +78,7 @@ type Output = { type: 'text'; text: string } | { type: 'image'; data: string; mi
 type Job = { id: string; account: string; lane: string; who: string; event: ReceivedEvent; input_image?: string;
   state: 'pending' | 'generating' | 'ready' | 'sending' | 'submitted' | 'unknown' | 'failed' | 'ignored';
   outputs: Output[]; total?: number; next: number; attempts: number; due: number; error: string | null; created: number;
+  failed_at?: number;
   /** Endpoint as accepted time. The token is deliberately absent from the job row:
    * it lives only in credential_revisions, addressed by credential_revision. */
   snapshot?: Omit<EndpointSnapshot,'token'> & {version:1; admission:Admission;session_policy:'legacy-lane-v1'|'family-group-v1';session_key:string;expected_destination?:string}; credential_revision?: number; media_credential_revision?:number; recipient?: string };
@@ -456,7 +457,7 @@ export class OpenClawBridge {
     else if (action==='mark_submitted') {
       if (job.state!=='unknown') return fail('OPENCLAW_JOB_NOT_REVIEWABLE',409);
       job.next++; job.state=job.next===job.outputs.length?'submitted':'ready';
-    } else { job.state=job.outputs.length?'ready':'pending'; job.attempts=0;job.due=0; }
+    } else { job.state=job.outputs.length?'ready':'pending'; job.attempts=0;job.due=0; delete job.failed_at; }
     job.error=null; this.save(job);
   }
   private jobs(): Job[] {
@@ -475,8 +476,21 @@ export class OpenClawBridge {
     this.timer=setInterval(()=>{void this.tick().catch(()=>{this.fault='OPENCLAW_STORAGE_OR_WORKER_ERROR';});},1000);
     this.timer.unref();
   }
+  private autoSkipExpired(): void {
+    for (const job of this.jobs()) {
+      if (job.state === 'failed' && job.error === 'OPENCLAW_HTTP_503') {
+        const failedAt = job.failed_at ?? job.created;
+        if (this.now() - failedAt >= 180_000) {
+          job.state = 'ignored';
+          job.error = null;
+          this.save(job);
+        }
+      }
+    }
+  }
   tick(): Promise<void> {
     if (this.stopping || this.paused || this.fault) return Promise.resolve();
+    this.autoSkipExpired();
     // A slow model turn must not prevent caching newly arriving LINE images.
     if(!this.mediaTask)this.mediaTask=this.prefetch().catch(()=>{this.fault='OPENCLAW_STORAGE_OR_WORKER_ERROR';})
       .finally(()=>{this.mediaTask=undefined;});
@@ -565,7 +579,7 @@ export class OpenClawBridge {
         job.error=code;
         if (job.state==='pending' && ((!family && ['OPENCLAW_CONNECT_UNAVAILABLE','LINE_CONTENT_UNAVAILABLE','OPENCLAW_HTTP_429','OPENCLAW_HTTP_503'].includes(code)) || (family && code==='FAMILY_HTTP_RETRY_SAFE') || /^LINE_CONTENT_HTTP_5/.test(code))) {
           this.retry(job,code);
-        } else { job.state='failed';this.save(job); }
+        } else { job.state='failed';job.failed_at=this.now();this.save(job); }
         return;
       }
     }
@@ -617,7 +631,7 @@ export class OpenClawBridge {
   }
   private retry(job: Job, code: string): void {
     job.error=code;job.attempts++;
-    if (job.attempts>=8) job.state='failed';
+    if (job.attempts>=8) { job.state='failed'; job.failed_at=this.now(); }
     job.due=this.now()+Math.min(300_000,5000*2**job.attempts);this.save(job);
   }
   async pause(): Promise<void> { this.paused=true; if(this.timer)clearInterval(this.timer); this.timer=undefined; await Promise.all([this.task?.catch(()=>undefined),this.mediaTask?.catch(()=>undefined)]); }

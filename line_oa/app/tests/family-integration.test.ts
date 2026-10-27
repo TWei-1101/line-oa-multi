@@ -18,10 +18,11 @@ const endpoint = {
   protocol: "family-text-v1",
 };
 const answer = { text: "reply" };
-async function setup() {
+async function setup(customFetcher?: (url: any, init: any) => Promise<Response>) {
   const root = await mkdtemp(tmpdir() + "/family-int-");
   const calls: any[] = [],
     sent: any[] = [];
+  let currentTime = 1_000_000_000;
   const deps = {
     boundDestination:()=>dest,
     hasAlias: () => true,
@@ -37,8 +38,10 @@ async function setup() {
     }),
     fetch: async (url: any, init: any) => {
       calls.push({ url, init });
+      if (customFetcher) return customFetcher(url, init);
       return Response.json(answer);
     },
+    now: () => currentTime,
   };
   let bridge = new OpenClawBridge(root, deps);
   await bridge.load();
@@ -65,6 +68,9 @@ async function setup() {
     calls,
     sent,
     hook,
+    advance(ms: number) {
+      currentTime += ms;
+    },
     get bridge() {
       return bridge;
     },
@@ -295,4 +301,50 @@ test('valid family generating restart is uncertain and explicit review preserves
 
 test('signed admission retains bounded original mentions through truncation and accepts count limit',async()=>{
  const f=await setup();try{const mention={index:3,length:4,type:'user',userId:dest};await receive(f,'count-limit-positive',Array(50).fill(mention));await receive(f,'truncated-positive',[mention],'hi @bot '+'x'.repeat(5000));await receive(f,'malformed-second-type',[mention,{...mention,type:'unknown'}]);assert.equal(f.bridge.status().jobs.length,2);assert.equal(f.hook.events(0).events.length,3);assert.equal(f.hook.events(0).events[1].text!.length,5000);}finally{await f.close();}
+});
+
+test('family 503 failed job is automatically marked ignored after 3 minutes and unblocks lane', async () => {
+  let should503 = true;
+  const f = await setup(async () => {
+    if (should503) return new Response('Service Unavailable', { status: 503 });
+    return Response.json({ text: 'second message reply' });
+  });
+  try {
+    const mention = [{ index: 3, length: 4, type: 'user', userId: dest }];
+    await receive(f, 'msg-503-first', mention, 'first @bot');
+    await f.bridge.tick();
+    assert.equal(f.bridge.status().counts.failed, 1);
+    const failedJob = f.bridge.status().jobs.find(j => j.id.startsWith('family:') || j.account === 'family')!;
+    assert.equal(failedJob.state, 'failed');
+    assert.equal(failedJob.error, 'OPENCLAW_HTTP_503');
+
+    // Queue second message on the same group/lane
+    await receive(f, 'msg-ok-second', mention, 'second @bot');
+    await f.bridge.tick();
+    // Second job is blocked in pending
+    assert.equal(f.bridge.status().counts.failed, 1);
+    assert.equal(f.bridge.status().counts.pending, 1);
+    assert.equal(f.calls.length, 1); // Only the first call happened
+
+    // Advance 2 minutes (120,000 ms) - still within 3 minutes window
+    f.advance(120_000);
+    await f.bridge.tick();
+    assert.equal(f.bridge.status().counts.failed, 1);
+    assert.equal(f.bridge.status().counts.pending, 1);
+    assert.equal(f.calls.length, 1);
+
+    // Now advance past 3 minutes total (advance another 60,001 ms -> 180,001 ms)
+    should503 = false;
+    f.advance(60_001);
+    await f.bridge.tick();
+
+    // The 503 failed job should now be automatically ignored, unblocking the second message!
+    assert.equal(f.bridge.status().counts.failed, 0);
+    assert.equal(f.bridge.status().counts.ignored, 1);
+    assert.equal(f.bridge.status().counts.submitted, 1);
+    assert.equal(f.sent.length, 1);
+    assert.equal(f.sent[0][1], 'second message reply');
+  } finally {
+    await f.close();
+  }
 });
